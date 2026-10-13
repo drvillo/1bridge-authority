@@ -18,7 +18,7 @@ The literal fixture `{ b: 2, a: 'x' }` becomes `{"a":"x","b":2}`.
 
 ## Binary transport and keys
 
-`encodeBase64Url` accepts Uint8Array, including empty bytes. `decodeBase64Url` requires unpadded URL alphabet, valid length and zero unused trailing bits by exact roundtrip equality (`src/encoding.ts:3`, `src/encoding.ts:10`). Decoding defaults to 1 MiB. An explicitly supplied maximum must be a nonnegative safe integer; explicit undefined rejects. Input length is bounded before alphabet work, native decode and result allocation. Production uses btoa/atob without Buffer or Node imports.
+`encodeBase64Url` accepts Uint8Array, including empty bytes, and encodes an owned native typed-array snapshot. Shadowed caller length properties, length getters and custom iterators cannot hide or append bytes (`src/encoding.ts:5`). `decodeBase64Url` requires unpadded URL alphabet, valid length and zero unused trailing bits by exact roundtrip equality (`src/encoding.ts:3`, `src/encoding.ts:11`). Decoding defaults to 1 MiB. An explicitly supplied maximum must be a nonnegative safe integer; explicit undefined rejects. Input length is bounded before alphabet work, native decode and result allocation. Production uses btoa/atob without Buffer or Node imports.
 
 Native keys use ECDSA/P-256; signatures use SHA-256 (`src/signatures.ts:7`). `generateSigningKey` produces extractable public/private keys with verify/sign usage respectively. Imports are extractable. Exporting PKCS8 reveals secret material that the consumer must protect; the library adds no persistence (`src/signatures.ts:38`, `src/signatures.ts:57`). Signing also permits native nonextractable private keys, while their export rejects.
 
@@ -52,7 +52,8 @@ The domain and decoded SPKI are explicit (`src/signatures.ts:71`); this fingerpr
 | Unsupported values, shapes, no getters/iterators, cycles | `src/canonical.ts:33`, `src/canonical.ts:66` | `test/canonical.test.ts:37`, `test/canonical.test.ts:57`, `test/canonical.test.ts:71`, `test/canonical.test.ts:87` |
 | 32-container and exact UTF-8 size bounds | `src/canonical.ts:27`, `src/canonical.ts:82` | `test/canonical.test.ts:97`, `test/canonical.test.ts:102`, `test/canonical.test.ts:134` |
 | Canonical parsing, malformed UTF-8 and BOM rejection | `src/canonical.ts:100`, `src/canonical.ts:108` | `test/canonical.test.ts:111`, `test/canonical.test.ts:117`, `test/canonical.test.ts:122` |
-| Literal binary codec, canonical bits, prebounds | `src/encoding.ts:3`, `src/encoding.ts:10` | `test/encoding.test.ts:10`, `test/encoding.test.ts:27`, `test/encoding.test.ts:40`, `test/encoding.test.ts:54` |
+| Literal binary codec, canonical bits, prebounds | `src/encoding.ts:3`, `src/encoding.ts:11` | `test/encoding.test.ts:10`, `test/encoding.test.ts:27`, `test/encoding.test.ts:40`, `test/encoding.test.ts:54` |
+| Actual native byte range despite shadowed length | `src/encoding.ts:5`, `src/encoding.ts:7` | `test/encoding.test.ts:76`, `test/encoding.test.ts:82` |
 | Native key profile, export/import, canonical SPKI | `src/signatures.ts:12`, `src/signatures.ts:49` | `test/signatures.test.ts:39`, `test/signatures.test.ts:53`, `test/signatures.test.ts:75`, `test/signatures.test.ts:105` |
 | Key ID exact LF domain and decoded SPKI | `src/signatures.ts:71` | `test/signatures.test.ts:68` |
 | Exact signed bytes and native P1363 cross-verification | `src/signatures.ts:27`, `src/signatures.ts:76` | `test/signatures.test.ts:130`, `test/signatures.test.ts:140`, `test/signatures.test.ts:145` |
@@ -67,8 +68,10 @@ On 2026-10-13 with Node v26.5.0 / pnpm 10.29.3:
 - Codec test-first red: 12 missing-feature failures; green: 38 tests.
 - Signing test-first red: 33 missing-feature failures; green: 33 tests. A later native compressed-SPKI characterization plus mutation brings this suite to 34.
 - Deliberately omitted sorting: 2 literal-order failures. Omitted parse equality: 10 expected rejection failures. Omitted purpose binding: 1 cross-purpose false/true failure. Omitted native SPKI equality: compressed-point import unexpectedly resolved. Restored every mutation.
-- Final `pnpm test`: 281/281 (51 canonical + 38 codec + 34 signing + unchanged 158 history).
+- Initial increment `pnpm test`: 281/281 (51 canonical + 38 codec + 34 signing + unchanged 158 history).
 - `pnpm typecheck`, `pnpm build`, exact 20-export built-ESM smoke and `git diff --check`: passed. Smoke exercised canonical, codec, native key import/export, signatures and key ID.
 - Seven-file engineering smell scan: no findings. No unrelated cleanup, runtime dependency, app or history change.
 
 The package has no lint, typecheck:gate, integration or E2E scripts. Real cryptographic roundtrips run at the unit layer with native WebCrypto and independently Node crypto. Actual browser execution, lowest-supported-Node runtime compatibility, formal correctness/composition, external security review and complete authority readiness remain unverified. Independent spec then quality review is coordinator-owned.
+
+Review fix verification (2026-10-13): three first-written regressions failed with expected `AQ` versus empty/`AQA` output for shadowed length 0, length 2 and a length getter. The native snapshot fixed the byte loop. Replacing it with the caller array reproduced all three failures; restoring it yielded 41 codec tests and 284/284 total tests (51 canonical + 41 codec + 34 signing + unchanged 158 history). `pnpm typecheck`, `pnpm build`, built ESM actual-byte/no-getter smoke, `git diff --check` and two-file advisory smell scan passed. No API, signature byte contract, dependency, app, metadata or history behavior changed.

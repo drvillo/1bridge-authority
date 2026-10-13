@@ -72,4 +72,18 @@ describe('canonical base64url codec', () => {
     expect(authority.encodeBase64Url(bytes)).toBe('_w')
     expect(iterator).not.toHaveBeenCalled()
   })
+
+  it.each([0, 2])('encodes the actual typed-array bytes despite shadowed length %i', (length) => {
+    const bytes = Uint8Array.of(1)
+    Object.defineProperty(bytes, 'length', { value: length })
+    expect(authority.encodeBase64Url(bytes)).toBe('AQ')
+  })
+
+  it('does not invoke a caller-provided length getter', () => {
+    const bytes = Uint8Array.of(1)
+    const getter = vi.fn(() => 0)
+    Object.defineProperty(bytes, 'length', { get: getter })
+    expect(authority.encodeBase64Url(bytes)).toBe('AQ')
+    expect(getter).not.toHaveBeenCalled()
+  })
 })

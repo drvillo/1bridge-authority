@@ -2,8 +2,9 @@ const DEFAULT_MAX_BYTES = 1024 * 1024
 
 export function encodeBase64Url(bytes: Uint8Array): string {
   if (!(bytes instanceof Uint8Array)) throw new TypeError('Expected Uint8Array bytes')
+  const snapshot = new Uint8Array(bytes)
   let binary = ''
-  for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]!)
+  for (let index = 0; index < snapshot.length; index += 1) binary += String.fromCharCode(snapshot[index]!)
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
