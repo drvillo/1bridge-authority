@@ -1,0 +1,33 @@
+{
+  "name": "@drvillo/1bridge-authority",
+  "version": "0.0.0",
+  "description": "Workspace-scoped authenticated authority and nonblocking governance evidence",
+  "type": "module",
+  "license": "MIT",
+  "packageManager": "pnpm@10.29.3",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "LICENSE",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.27",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  }
+}
