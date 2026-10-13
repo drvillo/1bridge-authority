@@ -10,6 +10,17 @@ Architecture: canonical restricted JSON, domain-separated message bytes and nati
 
 The public library history foundation owns SHA-256 and chronological proofs, not signatures. The existing app retains X25519/mk1 envelopes; it does not acquire signing authority by converting an encryption key. Shared design calls for new native P-256 roles. This increment introduces no app changes.
 
+Verified library evidence: `src/index.ts:1–2` exposes only hashes/history; `src/hash.ts:20–23` supplies internal native SHA-256. `package.json:23–26` defines test/typecheck/build; `tsconfig.json:6–9` includes DOM WebCrypto types. No route, model or DB state applies to pure library calls. App encryption behavior is a coordinator-supplied scope constraint, not reverified in this increment.
+
+Engineering workflow:
+
+- [x] 1. Ground truth: caller → pure library; no route, Prisma or persisted states.
+- [x] 2. Plan: file ownership and proposed names recorded before code.
+- [x] 3. Failing unit tests observed for each increment.
+- [x] 4. Smallest implementation passing those tests.
+- [x] 5. Scoped Boy Scout pass and advisory smell review.
+- [x] 6. Test, typecheck, build and built ESM verification.
+
 ## Journey and states
 
 | Caller | Transition | Failure |
@@ -29,6 +40,33 @@ No DB or routes are involved. Approval attribution comes from later authenticate
 - src/index.ts: named exports.
 
 If private helpers beyond these names are needed, record them before code. No conditional/conjunction names needed.
+
+Additional private names recorded before implementation:
+
+| Name | Honest description | Name-strain signals / decision |
+|---|---|---|
+| `EncodingState` | Canonical output chunks and consumed UTF-8 budget | Internal shape; one output state |
+| `appendEncoded` | Append one encoded fragment within the byte budget | None; private canonical byte accounting |
+| `encodeArray` | Encode dense own array entries | None; isolate array shape validation |
+| `encodeObject` | Encode sorted own object data properties | None; isolate object shape validation |
+| `assertSigningKey` | Require native P-256 key of expected type and usage | None; one key profile guard |
+| `recordBytes` | Produce the purpose-domain canonical record snapshot | None; one message-byte contract |
+| `keyBytes` | Decode a bounded nonempty key encoding | None; one key transport bound |
+| `concatBytes` | Concatenate two byte arrays into owned bytes | None; private byte ownership |
+
+Test fixture names: `nestedArray` constructs a bounded-depth fixture; `nativePair` creates an ephemeral native key fixture; `nativePublic` and `nativePrivate` export ephemeral native fixture bytes; `nativeMessage` supplies independently literal signed bytes. Test helpers are confined to unit suites and never log secret key material.
+
+Container nesting is counted from the root container as one, with a maximum of 32 containers. Objects encode every own string data property (including nonenumerable data); accessors and symbol properties reject. Arrays require the ordinary Array prototype, dense own indexed data properties, and no additional own keys. Descriptor reads avoid invoking getters, iterators or `toJSON`.
+
+## Test plan
+
+| Behavior | Layer | Outcome assertion | Why |
+|---|---|---|---|
+| Canonical records and serialized rejection | Unit | Literal bytes; unsupported/ambiguous inputs throw | Pure synchronous functions |
+| Canonical base64url and bounds | Unit | Literal vectors; invalid encodings throw before decode | Pure codec |
+| Signing and independent native verification | Unit with real WebCrypto | Native verifier accepts exact bytes; altered inputs return false | No storage or browser flow involved |
+
+No new dependencies or directory conventions are introduced. The profile lives in the existing `docs/encoding-signature-profile.md` convention. Cleanup is limited to owned files; history behavior and tests remain untouched.
 
 ## Fixed API and byte contract
 
@@ -67,3 +105,5 @@ Signed message bytes are TextEncoder.encode('1bridge.authority/v1\n' + purpose +
 SRP: canonical records, binary codec and signature operation. DRY: one domain/record encoding, one key profile. KISS: native cryptography and existing dev tools; no JWT/new dependency. No app cleanup or business-policy invention. JSON limits guard untrusted records without a second serialization framework.
 
 Require independent spec review, then quality review. Run full pnpm test/typecheck/build and built-ESM import smoke. Full browser runtime, authority-policy/map/receipt/token/storage and observer gates remain later readiness obligations. Do not claim authenticated customer identity, constant-time JavaScript private operations, independent audit or formal composition correctness from these tests.
+
+Executed implementation evidence (2026-10-13): canonical suite initially failed 11 missing-feature assertions, codec suite 12, signature suite 33. Focused suites then passed 51/38/33; one additional native compressed-SPKI characterization raised the final signature count to 34. Mutations caught omitted sorting (2 failures), omitted canonical parse equality (10), omitted purpose binding (1), and omitted native SPKI re-export equality (1); all restored. Final `pnpm test` passed 281 tests, preserving all 158 history tests; `pnpm typecheck`, `pnpm build`, exact 20-export built-ESM smoke and `git diff --check` passed. Seven-file advisory smell scan reported no findings. This package has no lint, `typecheck:gate`, integration or E2E scripts; real crypto roundtrips are exercised by unit tests against native WebCrypto and Node crypto. Independent reviews are coordinator-owned and not claimed here.
