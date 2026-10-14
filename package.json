@@ -20,8 +20,8 @@
       "import": "./dist/index.js"
     },
     "./server": {
+      "types": "./dist/blind-proof-access-server.d.ts",
       "node": {
-        "types": "./dist/blind-proof-access-server.d.ts",
         "import": "./dist/blind-proof-access-server.js"
       }
     }
