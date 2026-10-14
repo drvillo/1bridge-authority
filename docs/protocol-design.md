@@ -1,6 +1,6 @@
 # Authority and observation protocol blueprint
 
-Status: shared design. History, ordered-map proofs, signed checkpoints, pinned authority lifecycle, evidence commitments and blind proof-access primitives have implemented exports; action completion, observer coverage, private evidence bodies and app storage remain planned. Nothing in this document claims full-library readiness, cryptographic review or deployed 1bridge support.
+Status: shared design. History, ordered-map proofs, signed checkpoints, pinned authority lifecycle, evidence commitments, actor-signed completion/receipt primitives, complete-prefix and bounded-page process-local replay, and blind proof-access primitives have implemented exports. Observer coverage, private evidence bodies, product-effect integration and app storage remain planned. Nothing in this document claims full-library readiness, cryptographic review or deployed 1bridge support.
 
 ## Shared ownership
 
@@ -34,7 +34,7 @@ Each authority revision commits expected predecessor and resulting map root into
 
 SignedAction binds protocol version, workspace/log, operation ID, actor signing-key/version/device stream, action class, exact authority/policy revision, intended event/content/result commitments, expected predecessor and previous VERIFIED completion evidence. Rejected/canceled/abandoned attempts do not advance the completed-action chain.
 
-CompletionReceipt binds exact action/event hash, result commitment, log leaf index, provider-signed checkpoint and inclusion proof. Receipt status distinguishes integrated evidence from a future integration promise; initial release contract requires locally integrated evidence. Product mutation/journal/replay result are atomic, with a short expected-head update. No network call runs under that database transaction.
+CompletionReceipt binds exact action/event hash, result commitment, log leaf index, provider-signed checkpoint and inclusion proof. The library verifies a receipt but cannot establish the corresponding product effect or database transaction. The product's local integration and release contract remains an open design decision; no observer round trip may hold a release. A future app adapter should atomically persist the product mutation and replayable journal under a short expected-head update, without a network call inside that transaction.
 
 Clients validate and retain receipts before accepting protocol completion, keep device-scoped history pins, and include prior receipts within later signed actions. Input retries replay the same result or reject changed canonical payloads. New devices import authenticated state or bootstrap independently rather than silently resetting trust from the provider.
 
@@ -62,6 +62,6 @@ Observer persistence is independently administered Postgres, also compatible wit
 
 ## Readiness gates and research
 
-Remaining library increments require canonical/signature conformance, root/delegation/revocation/recovery replay, ordered-map presence/absence, receipts/pins/coverage, audience evidence, blind-access vectors/replay, storage concurrency/crash tests and actual browser/Node imports. Observer fixtures and real Postgres/Vercel setup must pass before app edits.
+Completed primitives have canonical/signature, lifecycle, ordered-map, receipt, blind-access and Node/browser tests, including bounded-page replay shapes documented separately. Remaining readiness work includes high-cardinality replay capacity, product issuance and one-use redemption, private audience evidence opening, product-effect binding, and storage concurrency/crash tests. Observer fixtures and real Postgres/Vercel setup must pass before app edits.
 
 Trace CIRT (NDSS 2014), RFC 9162 history, SUNDR (OSDI 2004) fork reasoning, CATS (FAST 2007) accountability, and RFC 9474/Privacy Pass token privacy to exact functions/tests/results. Adaptations and trust/delivery assumptions remain explicit; passing tests is not formal verification of the complete composition.

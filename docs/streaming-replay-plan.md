@@ -1,10 +1,10 @@
 # Bounded-page governance replay plan
 
-> Proposed additive library increment. The existing complete-prefix verifier remains the reference path. This increment removes its fixed 10,000-leaf input ceiling for a single process without treating a serialized cache as proof.
+> Implemented library increment at commit `120f17b`. The complete-prefix verifier and bounded-page session share one engine. This removes the fixed 10,000-leaf input ceiling for a single process without treating a serialized cache as proof; observer catch-up after cold restarts remains a separate readiness gate.
 
 ## Ground truth and gap
 
-`src/replay.ts` currently copies at most 10,000 leaves and 32 MiB into one call, starts from the independently pinned anchor every time, and returns a public snapshot that omits the authority key-use ledger, Merkle frontier, operation IDs, accepted checkpoint index and actor predecessor leaf. That snapshot cannot safely resume verification. `src/authority-lifecycle.ts` keeps important anti-reuse state inside opaque `AuthorityState`. The observer source protocol pages leaves 64 at a time and checkpoints 16 at a time. A checkpoint can cover several leaf pages, so fetched pages are tentative until the enclosing signed checkpoint is verified.
+The original `replayGovernanceHistory` copies at most 10,000 leaves and 32 MiB into one call, starts from the independently pinned anchor every time, and returns a public snapshot that omits the authority key-use ledger, Merkle frontier, operation IDs, accepted checkpoint index and actor predecessor leaf. That snapshot cannot safely resume verification. `src/authority-lifecycle.ts` keeps important anti-reuse state inside opaque `AuthorityState`. The observer source protocol pages leaves 64 at a time and checkpoints 16 at a time. A checkpoint can cover several leaf pages, so fetched pages are tentative until the enclosing signed checkpoint is verified.
 
 ## Contract
 
