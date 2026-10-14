@@ -359,11 +359,18 @@ describe('bounded-page governance replay session', () => {
     expect(session.snapshot().size).toBe(0)
     await session.appendLeaves([history.leaves[0]!], history.heads[1]!)
     expect(session.snapshot().size).toBe(0)
-    const first = await session.sealCheckpoint(history.heads[1]!)
-    expect(first.size).toBe(1)
+    expect(await session.sealCheckpoint(history.heads[1]!)).toBeUndefined()
+    expect(session.snapshot().size).toBe(1)
+    const sealedOne = session.snapshot()
+    expect(session.snapshot()).toBe(sealedOne)
     await session.appendLeaves([history.leaves[1]!], history.heads[2]!)
     expect(session.snapshot().size).toBe(1)
-    expect((await session.sealCheckpoint(history.heads[2]!)).size).toBe(2)
+    expect(session.snapshot().actorHeads).toEqual([])
+    expect(session.snapshot()).toBe(sealedOne)
+    await session.sealCheckpoint(history.heads[2]!)
+    expect(session.snapshot().size).toBe(2)
+    expect(session.snapshot()).not.toBe(sealedOne)
+    expect(session.snapshot().actorHeads).toHaveLength(1)
     for (let index = 2; index < history.leaves.length; index++) {
       await session.appendLeaves([history.leaves[index]!], history.heads[index + 1]!)
       await session.sealCheckpoint(history.heads[index + 1]!)
@@ -387,13 +394,15 @@ describe('bounded-page governance replay session', () => {
     await session.appendLeaves([leaves[7]!], spanning)
     await session.appendLeaves([leaves[8]!], spanning)
     expect(session.snapshot().size).toBe(7)
-    expect((await session.sealCheckpoint(spanning)).size).toBe(9)
+    await session.sealCheckpoint(spanning)
+    expect(session.snapshot().size).toBe(9)
     const signed = await action(secondState, spanning, history.keys.alice, ALICE,
       '7'.repeat(64), history.second.integrated)
     leaves.push(authority.governanceCompletionLeaf(signed))
     const last = await checkpoint(leaves, secondState, spanning, history.keys.rotated)
     await session.appendLeaves([leaves[9]!], last)
-    expect((await session.sealCheckpoint(last)).size).toBe(10)
+    await session.sealCheckpoint(last)
+    expect(session.snapshot().size).toBe(10)
     expect(session.snapshot()).toEqual(await authority.replayGovernanceHistory(history.signedAnchor,
       history.pin, leaves, [...history.heads, spanning, last]))
   })
@@ -422,7 +431,8 @@ describe('bounded-page governance replay session', () => {
     const pending = session.appendLeaves([owned], history.heads[1]!)
     owned[0] = owned[0]! ^ 1
     await pending
-    expect((await session.sealCheckpoint(history.heads[1]!)).size).toBe(1)
+    await session.sealCheckpoint(history.heads[1]!)
+    expect(session.snapshot().size).toBe(1)
   })
 
   it('rejects noncanonical, reordered and skipped history before coverage advances', async () => {
@@ -444,7 +454,8 @@ describe('bounded-page governance replay session', () => {
     const valid = await acceptedPrefix(5)
     await valid.appendLeaves([history.leaves[5]!], history.heads[6]!)
     expect(valid.snapshot().size).toBe(5)
-    expect((await valid.sealCheckpoint(history.heads[6]!)).size).toBe(6)
+    await valid.sealCheckpoint(history.heads[6]!)
+    expect(valid.snapshot().size).toBe(6)
 
     const stale = await authority.signCheckpoint({ ...history.heads[6]!.statement,
       signerKeyId: await authority.signingKeyId(history.keys.provider.publicKey) }, history.keys.provider)
@@ -489,6 +500,22 @@ describe('bounded-page governance replay session', () => {
     const tooLarge = await acceptedPrefix(0)
     await expect(tooLarge.appendLeaves(Array.from({ length: 11 }, () => new Uint8Array(24 * 1024)),
       history.heads[1]!)).rejects.toThrow(/256 KiB/)
+  })
+
+  it('uses tentative actor state to reject two unlinked same-key actions in one checkpoint', async () => {
+    const parsed = authority.parseCanonical(history.leaves[0]!) as unknown as {
+      revision: authority.SignedAuthorityRevision
+    }
+    const initial = await authority.verifyAuthorityAnchor(history.signedAnchor, history.pin)
+    const bound = await authority.applyAuthorityRevision(initial, parsed.revision)
+    const first = await action(bound, history.heads[1]!, history.keys.alice, ALICE, 'a'.repeat(64))
+    const second = await action(bound, history.heads[1]!, history.keys.alice, ALICE, 'b'.repeat(64))
+    const leaves = [history.leaves[0]!, authority.governanceCompletionLeaf(first),
+      authority.governanceCompletionLeaf(second)]
+    const target = await checkpoint(leaves, bound, history.heads[1]!, history.keys.provider)
+    const session = await acceptedPrefix(1)
+    await expect(session.appendLeaves(leaves.slice(1), target)).rejects.toThrow(/predecessor mismatch/)
+    expect(() => session.snapshot()).toThrow(/failed session/)
   })
 
   it('poisons concurrent use so neither overlapping call reports accepted progress', async () => {

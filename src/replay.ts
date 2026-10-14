@@ -27,12 +27,13 @@ export interface GovernanceReplaySnapshot {
   actorHeads: ReadonlyArray<Readonly<{ actorKeyId: Hash; actionHash: Hash }>>
 }
 
-interface AcceptedAction { actionHash: Hash; leafIndex: number; operationId: Hash; effectCommitment: Hash }
+interface AcceptedAction { actionHash: Hash; leafIndex: number; operationId: Hash; effectCommitment: Hash; leaf: Uint8Array }
 interface AcceptedCheckpoint { signed: SignedCheckpoint; position: number }
+type AcceptedMeta = Omit<GovernanceReplaySnapshot, 'actorHeads'>
 
 export interface GovernanceReplaySession {
   appendLeaves(leaves: readonly Uint8Array[], nextCheckpoint: SignedCheckpoint): Promise<void>
-  sealCheckpoint(nextCheckpoint: SignedCheckpoint): Promise<GovernanceReplaySnapshot>
+  sealCheckpoint(nextCheckpoint: SignedCheckpoint): Promise<void>
   snapshot(): GovernanceReplaySnapshot
 }
 
@@ -94,16 +95,13 @@ async function snapshotCheckpoint(value: SignedCheckpoint): Promise<{ signed: Si
   return { signed, bytes, hash: await checkpointHash(signed.statement) }
 }
 
-async function acceptedSnapshot(authority: Awaited<ReturnType<typeof verifyAuthorityAnchor>>,
-  frontier: ReturnType<typeof emptyHistoryFrontier>, head: SignedCheckpoint,
-  actors: Map<Hash, AcceptedAction>): Promise<GovernanceReplaySnapshot> {
+function acceptedMeta(authority: Awaited<ReturnType<typeof verifyAuthorityAnchor>>,
+  size: number, headHash: Hash): AcceptedMeta {
   const final = authorityStateSnapshot(authority)
-  const actorHeads = [...actors.entries()].map(([actorKeyId, value]) => Object.freeze({ actorKeyId, actionHash: value.actionHash }))
-    .sort((a, b) => a.actorKeyId < b.actorKeyId ? -1 : a.actorKeyId > b.actorKeyId ? 1 : 0)
-  return Object.freeze({ feedId: final.feedId, size: frontier.size,
-    checkpointHash: await checkpointHash(head.statement), authorityRoot: final.authorityRoot,
+  return Object.freeze({ feedId: final.feedId, size,
+    checkpointHash: headHash, authorityRoot: final.authorityRoot,
     authorityRevision: final.revision, authorityRevisionHash: final.revisionHash,
-    policyEpoch: final.policyEpoch, observerPolicyHash: final.observerPolicyHash, actorHeads: Object.freeze(actorHeads) })
+    policyEpoch: final.policyEpoch, observerPolicyHash: final.observerPolicyHash })
 }
 
 class ReplaySession implements GovernanceReplaySession {
@@ -111,15 +109,16 @@ class ReplaySession implements GovernanceReplaySession {
   #frontier = emptyHistoryFrontier()
   #acceptedHeads: Map<Hash, AcceptedCheckpoint>
   #actors = new Map<Hash, AcceptedAction>()
+  #tentativeActors = new Map<Hash, AcceptedAction>()
   #operations = new Set<Hash>()
-  #actionLeaves = new Map<number, Uint8Array>()
-  #accepted: GovernanceReplaySnapshot
+  #accepted: AcceptedMeta
+  #snapshotCache: GovernanceReplaySnapshot | null = null
   #target: { signed: SignedCheckpoint; bytes: Uint8Array; hash: Hash } | null = null
   #failed = false
   #busy = false
 
   constructor(authority: Awaited<ReturnType<typeof verifyAuthorityAnchor>>, genesis: SignedCheckpoint,
-    genesisHash: Hash, initial: GovernanceReplaySnapshot) {
+    genesisHash: Hash, initial: AcceptedMeta) {
     this.#authority = authority
     this.#acceptedHeads = new Map([[genesisHash, { signed: genesis, position: 0 }]])
     this.#accepted = initial
@@ -127,7 +126,13 @@ class ReplaySession implements GovernanceReplaySession {
 
   snapshot(): GovernanceReplaySnapshot {
     if (this.#failed) throw new TypeError('Cannot read failed session')
-    return this.#accepted
+    if (!this.#snapshotCache) {
+      const actorHeads = [...this.#actors.entries()]
+        .map(([actorKeyId, value]) => Object.freeze({ actorKeyId, actionHash: value.actionHash }))
+        .sort((a, b) => a.actorKeyId < b.actorKeyId ? -1 : a.actorKeyId > b.actorKeyId ? 1 : 0)
+      this.#snapshotCache = Object.freeze({ ...this.#accepted, actorHeads: Object.freeze(actorHeads) })
+    }
+    return this.#snapshotCache
   }
 
   async #exclusive<T>(work: () => Promise<T>): Promise<T> {
@@ -199,7 +204,7 @@ class ReplaySession implements GovernanceReplaySession {
       const observed = this.#acceptedHeads.get(action.observedCheckpointHash)
       if (!observed) throw new TypeError(`Action at leaf ${leafIndex} observes an unauthenticated checkpoint`)
       if (this.#operations.has(action.operationId)) throw new TypeError(`Duplicate operation ID at leaf ${leafIndex}`)
-      const prior = this.#actors.get(action.actorKeyId)
+      const prior = this.#tentativeActors.get(action.actorKeyId) ?? this.#actors.get(action.actorKeyId)
       if (!prior) {
         if (action.previousActionHash !== null || action.previousReceipt !== null) {
           throw new TypeError(`First action at leaf ${leafIndex} names a predecessor`)
@@ -211,27 +216,25 @@ class ReplaySession implements GovernanceReplaySession {
         const receipt = action.previousReceipt
         const receiptHash = await checkpointHash(receipt.checkpoint.statement)
         const receiptHead = this.#acceptedHeads.get(receiptHash)
-        const predecessorLeaf = this.#actionLeaves.get(prior.leafIndex)
         if (!receiptHead || receiptHead.position > observed.position
           || !equalBytes(canonicalBytes(receiptHead.signed), canonicalBytes(receipt.checkpoint))
           || receipt.leafIndex !== prior.leafIndex || receipt.operationId !== prior.operationId
           || receipt.effectCommitment !== prior.effectCommitment || receipt.actionHash !== prior.actionHash
-          || !predecessorLeaf || !await verifyReceiptInclusion(receipt, predecessorLeaf, receiptHead.signed)) {
+          || !await verifyReceiptInclusion(receipt, prior.leaf, receiptHead.signed)) {
           throw new TypeError(`Actor stream receipt mismatch at leaf ${leafIndex}`)
         }
       }
       const actionHash = await governanceActionHash(action)
-      this.#actors.set(action.actorKeyId, { actionHash, leafIndex, operationId: action.operationId,
-        effectCommitment: action.effectCommitment })
+      this.#tentativeActors.set(action.actorKeyId, { actionHash, leafIndex, operationId: action.operationId,
+        effectCommitment: action.effectCommitment, leaf })
       this.#operations.add(action.operationId)
-      this.#actionLeaves.set(leafIndex, leaf)
     } else {
       throw new TypeError(`Unknown governance leaf kind at ${leafIndex}`)
     }
     this.#frontier = await appendHistory(this.#frontier, leaf)
   }
 
-  async sealCheckpoint(nextCheckpoint: SignedCheckpoint): Promise<GovernanceReplaySnapshot> {
+  async sealCheckpoint(nextCheckpoint: SignedCheckpoint): Promise<void> {
     return this.#exclusive(async () => {
       const target = await this.#targetCheckpoint(nextCheckpoint)
       const head = target.signed
@@ -245,9 +248,11 @@ class ReplaySession implements GovernanceReplaySession {
         throw new TypeError(`Checkpoint ${headIndex} disagrees with replayed authority or history`)
       }
       this.#acceptedHeads.set(target.hash, { signed: head, position: headIndex })
-      this.#accepted = await acceptedSnapshot(this.#authority, this.#frontier, head, this.#actors)
+      for (const [actorKeyId, action] of this.#tentativeActors) this.#actors.set(actorKeyId, action)
+      this.#tentativeActors.clear()
+      this.#accepted = acceptedMeta(this.#authority, this.#frontier.size, target.hash)
+      this.#snapshotCache = null
       this.#target = null
-      return this.#accepted
     })
   }
 }
@@ -272,7 +277,7 @@ export async function createGovernanceReplaySession(signedAnchor: SignedAuthorit
     || !await verifyCheckpoint(genesis.signed, genesisKey)) {
     throw new TypeError('Invalid signed genesis checkpoint')
   }
-  const initial = await acceptedSnapshot(authority, emptyHistoryFrontier(), genesis.signed, new Map())
+  const initial = acceptedMeta(authority, 0, genesis.hash)
   return new ReplaySession(authority, genesis.signed, genesis.hash, initial)
 }
 
