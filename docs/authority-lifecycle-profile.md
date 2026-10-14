@@ -1,0 +1,42 @@
+# Customer authority lifecycle v1
+
+This profile defines a portable, replayable control record. It does not enroll a real organization, authorize an app route, recover ciphertext, or prove global freshness. A fresh verifier must receive `expectedPin` through an independently authenticated channel; provider delivery of an anchor plus its own computed pin is insufficient. The product must not equate legacy membership with this authority.
+
+## Exact encoding
+
+All statements, signatures, and history leaves use the package's restricted canonical JSON and canonical base64url P-256 SPKI/signature profile. Every record has exact named data fields, ordinary plain objects and dense arrays. Hex IDs are lowercase 64-character SHA-256 values. Integer counters are nonnegative safe integers excluding negative zero. `feedId`, `workspaceId`, `subjectId`, `vaultId`, and `keyId` are opaque IDs; the profile does not derive real-world identity from them.
+
+`AuthorityAnchor` is exactly `{version:1,feedId,workspaceId,rootKeySpki,rootKeyId,recoveryKeySpki,recoveryKeyId,checkpointKeySpki,checkpointKeyId,authorityRoot,policyEpoch:0,observerPolicyHash:null}`. `authorityRoot` is the empty ordered-map root `SHA256(03)`. The three keys are distinct canonical P-256 signing SPKIs, and each key ID is the package fingerprint `signingKeyId`. `SignedAuthorityAnchor` is exactly `{anchor,rootSignature,recoverySignature}`. The signatures cover the anchor statement with purposes `authority.anchor.root` and `authority.anchor.recovery`. `anchorHash` (the pin) is `SHA256(UTF8("1bridge.authority/v1/anchor-id\n") || canonicalBytes(anchor))`. The pin commits the statement, independent of randomized signatures.
+
+`AuthorityBinding` is exactly one of:
+
+- Active: `{subjectId,keySpki,keyId,version,scope,actionClasses,status:'active'}`.
+- Tombstone: `{subjectId,keyId,version,status:'revoked'}`.
+
+`scope` is exactly `{kind:'workspace',workspaceId}` or `{kind:'vault',workspaceId,vaultId}`. `workspaceId` equals the anchor workspace. Action classes are 1–32 sorted, unique ASCII strings up to 64 bytes, matching `^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*){1,3}$`. They are opaque exact-match labels; the app must separately map routes to classes. V1 has no expiration timestamp.
+
+A map key is `SHA256(UTF8("1bridge.authority/v1/subject\n") || raw32(subjectId))`. A map value hash is `SHA256(UTF8("1bridge.authority/v1/binding\n") || canonicalBytes(binding))`. The map is sorted by derived map key and committed with `orderedMapRoot`. A revoked subject remains as a tombstone. Reset clears the current map, while retaining subject-version high water and every used key ID in replay state.
+
+`AuthorityRevision` is exactly `{version:1,feedId,workspaceId,number,previous,previousRoot,expectedPolicyEpoch,operation,authorityRoot,policyEpoch,signerKeyId}`. Its signed envelope is exactly `{statement,signature}`. `number` starts at 1 and increases by exactly one. `previous` is the prior revision statement hash, or the anchor pin for revision 1. Revision hash is `SHA256(UTF8("1bridge.authority/v1/revision-id\n") || canonicalBytes(statement))`. `previousRoot` and `expectedPolicyEpoch` bind the accepted prior state. Revision signatures use purpose `authority.revision`.
+
+`operation` is one exact discriminated union:
+
+- `{kind:'bind',binding:ActiveBinding}`: currently absent; version is retained high water plus one; actor key has never held any role.
+- `{kind:'update',binding:ActiveBinding}`: currently active; same key and SPKI; version increases exactly one; scope/classes may change.
+- `{kind:'revoke',binding:RevokedBinding}`: currently active; same key; version increases exactly one.
+- `{kind:'regrant',binding:ActiveBinding}`: currently revoked; fresh never-used key; version increases exactly one.
+- `{kind:'policy',body,policyHash}`: `body` is canonical JSON of at most 8192 bytes, or null. `policyHash` is null iff `body` is null; otherwise `SHA256(UTF8("1bridge.authority/v1/observer-policy\n") || canonicalBytes(body))`. The policy epoch increases exactly one; the map is unchanged. This module commits the body but does not interpret observer terms.
+- `{kind:'rotate-checkpoint',checkpointKeySpki,checkpointKeyId}`: fresh never-used P-256 provider key; map and policy epoch unchanged.
+- `{kind:'reset',rootKeySpki,rootKeyId,recoveryKeySpki,recoveryKeyId,rootPossession,recoveryPossession}`: fresh distinct keys, empty map, policy epoch increases exactly one, policy hash persists. The two possession signatures cover exactly `{version:1,feedId,workspaceId,number,previous,rootKeySpki,rootKeyId,recoveryKeySpki,recoveryKeyId}` with purposes `authority.reset.new-root` and `authority.reset.new-recovery`.
+
+Bind/update/revoke/regrant/policy/rotation revisions require the current customer root signature. Reset requires the current recovery signature. Root, recovery, checkpoint and actor key IDs cannot recur in any role across epochs. A reset invalidates current actors, while subject high-water versions and used key IDs persist. A subject may be bound again after reset only by a fresh key and higher version. Counters cannot overflow. A revision's canonical serialized envelope cannot exceed 16 KiB; replay batches cannot exceed 1024 revisions; current subjects cannot exceed 10000.
+
+`authorityRevisionLeaf` returns `canonicalBytes({version:1,kind:'authority.revision',revision:signedRevision})` after exact structural validation. The bytes are the single RFC 9162 leaf for that revision. A later full governance replay must parse leaves in index order, apply revisions before subsequent actions, and verify each checkpoint against reconstructed history size/root, authority root and policy epoch. The existing standalone `verifyCheckpointExtension` checks only same-signer history consistency and does not establish authority correctness. Cross-key checkpoint validation must additionally verify the customer-authorized rotation leaf, old and new checkpoint signatures, exact predecessor hash, and consistency proof. This increment provides no full action replay API.
+
+An authorized historical state is not necessarily the latest state. Clients retain the independently authenticated pin and prior checkpoint and enforce freshness; an observer retains its own head and demands contiguous published history. Loss of both customer root and independently held recovery key is irrecoverable within this protocol. Neither provider staff nor a valid old root can reset after root compromise.
+
+## Verification record
+
+The unit contract was first run before implementation and produced eight missing-export failures. After implementation, the focused suite passed 11/11. Removing the predecessor comparison made the targeted replay test fail because a wrong-predecessor revision was accepted; changing the binding-hash domain made the fixed-hash test fail. Both mutations were restored. The mixed-history test uses a placeholder action leaf as opaque bytes: it checks actual RFC roots/consistency and exact authority root, epoch and signer expectations, but does not claim action semantics or full governance replay.
+
+The package has no `lint`, `typecheck:gate`, integration or E2E scripts. This pure module changes no persistence, route or navigation contract. `pnpm test`, `pnpm typecheck`, `pnpm build`, built Node ESM import, staged diff check and the advisory smell scan are the applicable local gates. Actual browser execution and a complete cross-key checkpoint replay API remain outside this increment; the built root import must be exercised in a browser before claiming browser compatibility. Independent specification and quality review are separate gates.
