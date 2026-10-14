@@ -6,6 +6,12 @@ const WORKSPACE = 'b'.repeat(64)
 const ALICE = 'c'.repeat(64)
 const BOB = 'd'.repeat(64)
 const WRONG = '0'.repeat(64)
+const recipientClaim: authority.RecipientKeyClaim = {
+  version: 1, workspaceId: WORKSPACE, membershipId: ALICE, membershipKeyRowId: BOB,
+  membershipKeyVersion: 7, keySuite: 'x25519',
+  keyId: 'riFsLvUkejeCwTXvonmj5M3GEJQnD10r5YxiBLemEsk',
+  publicKey: 'v3.x25519.AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA',
+}
 
 async function revision(state: authority.AuthorityState, operation: authority.AuthorityOperation, root: CryptoKeyPair) {
   const current = authority.authorityStateSnapshot(state)
@@ -23,11 +29,12 @@ async function revision(state: authority.AuthorityState, operation: authority.Au
     signerKeyId: await authority.signingKeyId(root.publicKey) }, root)
 }
 
-async function binding(subjectId: string, pair: CryptoKeyPair): Promise<authority.ActiveBinding> {
+async function binding(subjectId: string, pair: CryptoKeyPair,
+  recipientKeyCommitment: authority.Hash | null = null): Promise<authority.ActiveBinding> {
   return { subjectId, keySpki: await authority.exportSigningPublicKey(pair.publicKey),
     keyId: await authority.signingKeyId(pair.publicKey), version: 1,
     scope: { kind: 'workspace', workspaceId: WORKSPACE }, actionClasses: ['document.read'],
-    recipientKeyCommitment: null, status: 'active' }
+    recipientKeyCommitment, status: 'active' }
 }
 
 async function checkpoint(leaves: Uint8Array[], state: authority.AuthorityState,
@@ -93,9 +100,9 @@ async function fixture() {
     await seal(signer)
     return { signed, leaf, integrated: await receipt(signed, leaf, index, leaves, heads.at(-1)!) }
   }
-  await appendRevision({ kind: 'bind', binding: await binding(ALICE, alice) }, provider)
+  await appendRevision({ kind: 'bind', binding: await binding(ALICE, alice,
+    await authority.recipientKeyClaimHash(recipientClaim)) }, provider)
   const first = await appendAction(alice, ALICE, '1'.repeat(64), null, provider)
-  const afterFirst = state
   await appendRevision({ kind: 'bind', binding: await binding(BOB, bob) }, provider)
   const other = await appendAction(bob, BOB, '2'.repeat(64), null, provider)
   const body = { strictAudit: true }
@@ -103,7 +110,7 @@ async function fixture() {
   await appendRevision({ kind: 'rotate-checkpoint', checkpointKeySpki: await authority.exportSigningPublicKey(rotated.publicKey),
     checkpointKeyId: await authority.signingKeyId(rotated.publicKey) }, rotated)
   const second = await appendAction(alice, ALICE, '3'.repeat(64), first.integrated, rotated)
-  return { signedAnchor, pin, leaves, heads, first, other, second, afterFirst,
+  return { signedAnchor, pin, leaves, heads, first, other, second,
     keys: { root, provider, rotated, alice, bob, outsider }, state }
 }
 
@@ -111,6 +118,19 @@ let history: Awaited<ReturnType<typeof fixture>>
 beforeAll(async () => { history = await fixture() })
 
 describe('pinned mixed-history replay', () => {
+  it('propagates a root-signed non-null recipient-key commitment through replay', async () => {
+    const expected = await authority.recipientKeyClaimHash(recipientClaim)
+    const parsed = authority.parseCanonical(history.leaves[0]!) as unknown as { revision: authority.SignedAuthorityRevision }
+    if (parsed.revision.statement.operation.kind !== 'bind') throw new TypeError('Expected Alice binding')
+    expect(parsed.revision.statement.operation.binding.recipientKeyCommitment).toBe(expected)
+    const genesisState = await authority.verifyAuthorityAnchor(history.signedAnchor, history.pin)
+    const afterBinding = await authority.applyAuthorityRevision(genesisState, parsed.revision)
+    expect(authority.authorityStateSnapshot(afterBinding).bindings[0]).toMatchObject({ recipientKeyCommitment: expected })
+    const replayed = await authority.replayGovernanceHistory(history.signedAnchor, history.pin,
+      history.leaves, history.heads)
+    expect(replayed.authorityRoot).toBe(authority.authorityStateSnapshot(history.state).authorityRoot)
+  })
+
   it('requires the independent anchor pin and an authorized signed genesis', async () => {
     await expect(authority.replayGovernanceHistory(history.signedAnchor, WRONG, [],
       [history.heads[0]!])).rejects.toThrow(/pin mismatch/)
@@ -194,19 +214,23 @@ describe('pinned mixed-history replay', () => {
 
   it('rejects an otherwise valid receipt from a signed divergent branch', async () => {
     const siblingBody = { branch: true }
-    const branch = await revision(history.afterFirst, { kind: 'policy', body: siblingBody,
+    const branch = await revision(history.state, { kind: 'policy', body: siblingBody,
       policyHash: await authority.observerPolicyHash(siblingBody) }, history.keys.root)
-    const branchState = await authority.applyAuthorityRevision(history.afterFirst, branch)
-    const branchLeaves = [...history.leaves.slice(0, 2), authority.authorityRevisionLeaf(branch)]
-    const branchHead = await checkpoint(branchLeaves, branchState, history.heads[2]!, history.keys.provider)
-    const branchReceipt = await receipt(history.first.signed, history.first.leaf, 1, branchLeaves, branchHead)
-    expect(await authority.verifyReceiptInclusion(branchReceipt, history.first.leaf, branchHead)).toBe(true)
+    const branchState = await authority.applyAuthorityRevision(history.state, branch)
+    const branchLeaves = [...history.leaves, authority.authorityRevisionLeaf(branch)]
+    const branchHead = await checkpoint(branchLeaves, branchState, history.heads[6]!, history.keys.rotated)
+    const branchReceipt = await receipt(history.second.signed, history.second.leaf, 6, branchLeaves, branchHead)
+    expect(await authority.verifyCheckpoint(branchHead, history.keys.rotated.publicKey)).toBe(true)
+    expect(await authority.verifyReceiptInclusion(branchReceipt, history.second.leaf, branchHead)).toBe(true)
+    expect(branchReceipt.actionHash).toBe(history.second.integrated.actionHash)
+    expect(branchHead.statement.previous).toBe(await authority.checkpointHash(history.heads[6]!.statement))
+    expect(branchHead.statement.size).toBe(8)
     const signed = await action(history.state, history.heads.at(-1)!, history.keys.alice, ALICE,
       '5'.repeat(64), branchReceipt)
     const leaves = [...history.leaves, authority.governanceCompletionLeaf(signed)]
     const head = await checkpoint(leaves, history.state, history.heads.at(-1)!, history.keys.rotated)
     await expect(authority.replayGovernanceHistory(history.signedAnchor, history.pin, leaves,
-      [...history.heads, head])).rejects.toThrow(/predecessor mismatch/)
+      [...history.heads, head])).rejects.toThrow(/receipt mismatch/)
   })
 
   it('rejects duplicate operations and receipts that do not identify the exact prior action', async () => {
