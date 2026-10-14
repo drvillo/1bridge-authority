@@ -218,19 +218,35 @@ describe('pinned mixed-history replay', () => {
       policyHash: await authority.observerPolicyHash(siblingBody) }, history.keys.root)
     const branchState = await authority.applyAuthorityRevision(history.state, branch)
     const branchLeaves = [...history.leaves, authority.authorityRevisionLeaf(branch)]
-    const branchHead = await checkpoint(branchLeaves, branchState, history.heads[6]!, history.keys.rotated)
+    const branchHead = await checkpoint(branchLeaves, branchState, history.heads[7]!, history.keys.rotated)
     const branchReceipt = await receipt(history.second.signed, history.second.leaf, 6, branchLeaves, branchHead)
     expect(await authority.verifyCheckpoint(branchHead, history.keys.rotated.publicKey)).toBe(true)
     expect(await authority.verifyReceiptInclusion(branchReceipt, history.second.leaf, branchHead)).toBe(true)
     expect(branchReceipt.actionHash).toBe(history.second.integrated.actionHash)
-    expect(branchHead.statement.previous).toBe(await authority.checkpointHash(history.heads[6]!.statement))
+    expect(branchHead.statement.previous).toBe(await authority.checkpointHash(history.heads[7]!.statement))
     expect(branchHead.statement.size).toBe(8)
-    const signed = await action(history.state, history.heads.at(-1)!, history.keys.alice, ALICE,
+    const replayedBranch = await authority.replayGovernanceHistory(history.signedAnchor, history.pin,
+      branchLeaves, [...history.heads, branchHead])
+    expect(replayedBranch.size).toBe(8)
+    expect(replayedBranch.checkpointHash).toBe(await authority.checkpointHash(branchHead.statement))
+
+    const canonicalBody = { branch: false }
+    const canonicalRevision = await revision(history.state, { kind: 'policy', body: canonicalBody,
+      policyHash: await authority.observerPolicyHash(canonicalBody) }, history.keys.root)
+    const canonicalState = await authority.applyAuthorityRevision(history.state, canonicalRevision)
+    const canonicalLeaves = [...history.leaves, authority.authorityRevisionLeaf(canonicalRevision)]
+    const observed = await checkpoint(canonicalLeaves, canonicalState, history.heads[7]!, history.keys.rotated)
+    expect(branchHead.statement.size).toBeLessThanOrEqual(observed.statement.size)
+    expect(await authority.checkpointHash(branchHead.statement)).not.toBe(await authority.checkpointHash(observed.statement))
+    const replayedCanonical = await authority.replayGovernanceHistory(history.signedAnchor, history.pin,
+      canonicalLeaves, [...history.heads, observed])
+    expect(replayedCanonical.size).toBe(8)
+    const signed = await action(canonicalState, observed, history.keys.alice, ALICE,
       '5'.repeat(64), branchReceipt)
-    const leaves = [...history.leaves, authority.governanceCompletionLeaf(signed)]
-    const head = await checkpoint(leaves, history.state, history.heads.at(-1)!, history.keys.rotated)
+    const leaves = [...canonicalLeaves, authority.governanceCompletionLeaf(signed)]
+    const head = await checkpoint(leaves, canonicalState, observed, history.keys.rotated)
     await expect(authority.replayGovernanceHistory(history.signedAnchor, history.pin, leaves,
-      [...history.heads, head])).rejects.toThrow(/receipt mismatch/)
+      [...history.heads, observed, head])).rejects.toThrow(/receipt mismatch/)
   })
 
   it('rejects duplicate operations and receipts that do not identify the exact prior action', async () => {
