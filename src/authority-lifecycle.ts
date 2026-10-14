@@ -39,6 +39,7 @@ export type AuthorityOperation =
   | { kind: 'policy'; body: unknown | null; policyHash: Hash | null }
   | { kind: 'rotate-checkpoint'; checkpointKeySpki: string; checkpointKeyId: Hash }
   | { kind: 'reset'; rootKeySpki: string; rootKeyId: Hash; recoveryKeySpki: string; recoveryKeyId: Hash; rootPossession: string; recoveryPossession: string }
+export type AuthorityBindingOperation = Extract<AuthorityOperation, { binding: AuthorityBinding }>
 export interface AuthorityRevision {
   version: 1
   feedId: Hash
@@ -280,21 +281,33 @@ export async function signAuthorityRevision(statement: AuthorityRevision, signer
   if (!await verifyRecord('authority.revision', snapshot, signed.signature, keys.publicKey)) throw new TypeError('Revision signing pair mismatch')
   return snapshotSigned(signed)
 }
-export async function signAuthorityBindingRevision(state: AuthorityState, binding: ActiveBinding, rootPair: CryptoKeyPair): Promise<SignedAuthorityRevision> {
+export async function signAuthorityBindingOperation(state: AuthorityState, operation: AuthorityBindingOperation,
+  rootPair: CryptoKeyPair): Promise<SignedAuthorityRevision> {
   const current = internal(state)
-  const proposed = snapshotBinding(binding)
-  if (proposed.status !== 'active') throw new TypeError('Expected active binding')
+  const proposed = snapshotBinding(operation.binding)
+  let nextOperation: AuthorityBindingOperation
+  if (operation.kind === 'revoke') {
+    if (proposed.status !== 'revoked') throw new TypeError('Expected revoked binding')
+    nextOperation = { kind: 'revoke', binding: proposed }
+  } else {
+    if (proposed.status !== 'active') throw new TypeError('Expected active binding')
+    nextOperation = { kind: operation.kind, binding: proposed }
+  }
   const bindings = new Map(current.bindings)
   bindings.set(proposed.subjectId, proposed)
   const statement: AuthorityRevision = {
     version: 1, feedId: current.anchor.feedId, workspaceId: current.anchor.workspaceId,
     number: current.revision + 1, previous: current.revisionHash, previousRoot: current.authorityRoot,
-    expectedPolicyEpoch: current.policyEpoch, operation: { kind: 'bind', binding: proposed },
+    expectedPolicyEpoch: current.policyEpoch, operation: nextOperation,
     authorityRoot: await mapRoot(bindings), policyEpoch: current.policyEpoch, signerKeyId: current.rootKeyId,
   }
   const signed = await signAuthorityRevision(statement, rootPair)
   await applyAuthorityRevision(state, signed)
   return signed
+}
+export async function signAuthorityBindingRevision(state: AuthorityState, binding: ActiveBinding,
+  rootPair: CryptoKeyPair): Promise<SignedAuthorityRevision> {
+  return signAuthorityBindingOperation(state, { kind: 'bind', binding }, rootPair)
 }
 export function authorityRevisionLeaf(revision: SignedAuthorityRevision): Uint8Array {
   const signed = snapshotSigned(revision)

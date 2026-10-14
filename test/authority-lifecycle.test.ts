@@ -169,6 +169,28 @@ describe('customer authority lifecycle', () => {
     await expect(api.signAuthorityBindingRevision(next, binding, root)).rejects.toThrow()
   })
 
+  it('constructs signed binding updates and tombstones from the current authority map', async () => {
+    const { state } = await initial()
+    const first = await api.signAuthorityBindingRevision(state, await active(), root)
+    const bound = await api.applyAuthorityRevision(state, first)
+    const updated = { ...await active(SUBJECT, actor, 2), actionClasses: ['document.read', 'document.write'] }
+    const signedUpdate = await api.signAuthorityBindingOperation(bound,
+      { kind: 'update', binding: updated }, root)
+    expect(signedUpdate.statement.operation).toEqual({ kind: 'update', binding: updated })
+    const changed = await api.applyAuthorityRevision(bound, signedUpdate)
+    expect(api.authorityStateSnapshot(changed).bindings).toEqual([updated])
+    const tombstone = { subjectId: SUBJECT, keyId: updated.keyId, version: 3, status: 'revoked' }
+    const signedRevoke = await api.signAuthorityBindingOperation(changed,
+      { kind: 'revoke', binding: tombstone }, root)
+    const revoked = await api.applyAuthorityRevision(changed, signedRevoke)
+    expect(api.authorityStateSnapshot(revoked).bindings).toEqual([tombstone])
+    expect(signedRevoke.statement.authorityRoot).toBe(api.authorityStateSnapshot(revoked).authorityRoot)
+    await expect(api.signAuthorityBindingOperation(changed,
+      { kind: 'revoke', binding: { ...tombstone, version: 4 } }, root)).rejects.toThrow()
+    await expect(api.signAuthorityBindingOperation(changed,
+      { kind: 'revoke', binding: tombstone }, other)).rejects.toThrow()
+  })
+
   it('refuses a binding revision when its map commitment is changed', async () => {
     const { state } = await initial()
     const signed = await api.signAuthorityBindingRevision(state, await active(), root)
