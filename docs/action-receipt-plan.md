@@ -1,6 +1,6 @@
 # Signed action and integrated receipt increment plan
 
-> Design for the next portable-library increment. No action, receipt or full mixed-log replay export exists yet. Review this contract before implementation and keep the app untouched until both public repos are ready and tested.
+> Implementation record for the portable action/receipt increment. The action and inclusion-only receipt APIs and a real mixed-history contract fixture are implemented and independently reviewed. Full mixed-log replay is a separate increment in `docs/mixed-history-replay-plan.md`; keep the app untouched until both public repos are ready and tested.
 
 **Goal:** Make a customer-delegated actor's exact governed intent and deterministic effect attributable, then give the client an integrated receipt that can be checked against a customer-authorized signed history checkpoint. The product continues to enforce its existing operational roles; the library checks portable signed evidence.
 
@@ -51,7 +51,7 @@ The one completed-operation stream is derived from the **customer-bound actor si
 | `governanceCompletionLeaf` | Canonical completed-event leaf bytes | Keep |
 | `src/completion-receipt.ts` `verifyReceiptInclusion` | Check exact leaf, receipt fields and RFC inclusion under a supplied signed head | Keep name scoped: caller must separately authenticate head/replay |
 | `completionReceiptHash` | Identify one exact integrated receipt artifact | Keep; do not use as stream head |
-| `src/replay.ts` (later increment) | Replay mixed contiguous leaves and authenticate checkpoint against pinned authority state | Required before observer/app readiness; design API after action/receipt implementation |
+| `src/replay.ts` (later increment) | Replay mixed contiguous leaves and authenticate checkpoint against pinned authority state | Required before observer/app readiness; design `replayGovernanceHistory` in `docs/mixed-history-replay-plan.md` |
 | `test/action.test.ts`, `test/completion-receipt.test.ts` | Pure positive, negative and mutation fixtures | Lowest layer |
 
 Avoid a generic policy engine, server-only Node import in the browser root, extra crypto package, or a separate app permission system. If verifier names need `And...` to be truthful, split signature/authority, inclusion/head and full replay claims into separate functions.
@@ -61,7 +61,7 @@ Avoid a generic policy engine, server-only Node import in the browser root, extr
 1. Write missing-export tests for canonical action statement, purpose-bound signature and binding/scope/class checks; observe red. Implement minimum action module. Break key/version/class/scope/authority-revision checks individually and confirm targeted failures, then restore.
 2. Test signed statement/effect versus completed leaf: exact operation, effect, version, extra/accessor fields, malformed hashes, changed payload, duplicate operation ID at a product-adapter fixture. Confirm byte-identical canonical round trip; distinguish meaningful governed effect from incidental database timestamps.
 3. Write receipt inclusion tests before implementation. Use independently constructed RFC history roots with interleaved authority and completion leaves, check exact leaf index/hash, size/root, swapped receipt/leaf and tampered proof. Construct two valid receipts for the same leaf under different valid heads/proofs: their artifact hashes may differ, but both name the same predecessor `actionHash`. A helper that checks only inclusion must be named/documented as such; do not label it fully witnessed.
-4. Add a mixed-history replay fixture that folds the pinned anchor, authority revisions, action, completion leaf and checkpoint, including provider-key rotation and two actor keys. Reject stale authority, revoked/reset actor, validly signed wrong authority root/policy, **wrong checkpoint signer**, skipped/reordered leaves, bad predecessor/consistency, a prior receipt from a divergent signed branch, and missing receipt-chain link. This fixture becomes the contract for the later `replayGovernanceBatch` implementation.
+4. Add a mixed-history fixture with the pinned anchor, authority revisions, actions, completion leaves and checkpoints, including provider-key rotation and two actor keys. Existing narrow APIs reject stale/revoked actors, skipped authority revisions, reordered leaf inclusion and bad same-key checkpoint predecessor/consistency. The fixture **demonstrates but cannot yet reject** validly signed wrong authority root/policy, unauthorized checkpoint signer, a prior receipt from a divergent signed branch and a missing actor-stream link. The later `replayGovernanceHistory` implementation must make those explicit negative fixtures fail closed; the current TODO is not a passing replay test.
 5. Run `pnpm test`, `pnpm typecheck`, `pnpm build`, browser root import, Node `./server` import, `git diff --check`, independent spec and quality review. Storage concurrency, crash and mail ordering require product/observer integration tests later; pure tests do not establish them.
 
 ## Principles, smells and verification
