@@ -13,3 +13,4 @@ export { signGovernanceAction, verifyGovernanceAction, governanceActionHash, gov
 export { completionReceiptHash, verifyReceiptInclusion, type CompletionReceipt } from './completion-receipt.js'
 export { recipientKeyClaimHash, type RecipientKeyClaim } from './recipient-key.js'
 export { replayGovernanceHistory, type GovernanceReplaySnapshot } from './replay.js'
+export { authorityId, authoritySubjectId, type AuthorityIdKind, type AuthoritySubjectIdentity } from './authority-ids.js'

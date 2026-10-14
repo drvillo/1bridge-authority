@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { authorityId, authoritySubjectId } from '../src/authority-ids.js'
+import { authorityId, authoritySubjectId } from '../src/index.js'
 
 const UUID = '550e8400-e29b-41d4-a716-446655440000'
 const KIND_VECTORS = {
