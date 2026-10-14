@@ -12,5 +12,5 @@ export { createAuthorityAnchor, signAuthorityAnchor, anchorHash, verifyAuthority
 export { signGovernanceAction, verifyGovernanceAction, governanceActionHash, governanceCompletionLeaf, type GovernanceAction, type SignedAction } from './action.js'
 export { completionReceiptHash, verifyReceiptInclusion, type CompletionReceipt } from './completion-receipt.js'
 export { recipientKeyClaimHash, type RecipientKeyClaim } from './recipient-key.js'
-export { replayGovernanceHistory, type GovernanceReplaySnapshot } from './replay.js'
+export { replayGovernanceHistory, createGovernanceReplaySession, type GovernanceReplaySnapshot, type GovernanceReplaySession } from './replay.js'
 export { authorityId, authoritySubjectId, type AuthorityIdKind, type AuthoritySubjectIdentity } from './authority-ids.js'

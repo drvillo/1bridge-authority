@@ -343,3 +343,160 @@ describe('pinned mixed-history replay', () => {
       history.heads)).rejects.toThrow(/data properties/)
   })
 })
+
+describe('bounded-page governance replay session', () => {
+  async function acceptedPrefix(size: number) {
+    const session = await authority.createGovernanceReplaySession(history.signedAnchor, history.pin, history.heads[0]!)
+    for (let index = 0; index < size; index++) {
+      await session.appendLeaves([history.leaves[index]!], history.heads[index + 1]!)
+      await session.sealCheckpoint(history.heads[index + 1]!)
+    }
+    return session
+  }
+
+  it('keeps pages tentative until the exact checkpoint is sealed, then lets the next action observe it', async () => {
+    const session = await authority.createGovernanceReplaySession(history.signedAnchor, history.pin, history.heads[0]!)
+    expect(session.snapshot().size).toBe(0)
+    await session.appendLeaves([history.leaves[0]!], history.heads[1]!)
+    expect(session.snapshot().size).toBe(0)
+    const first = await session.sealCheckpoint(history.heads[1]!)
+    expect(first.size).toBe(1)
+    await session.appendLeaves([history.leaves[1]!], history.heads[2]!)
+    expect(session.snapshot().size).toBe(1)
+    expect((await session.sealCheckpoint(history.heads[2]!)).size).toBe(2)
+    for (let index = 2; index < history.leaves.length; index++) {
+      await session.appendLeaves([history.leaves[index]!], history.heads[index + 1]!)
+      await session.sealCheckpoint(history.heads[index + 1]!)
+    }
+    expect(session.snapshot()).toEqual(await authority.replayGovernanceHistory(history.signedAnchor,
+      history.pin, history.leaves, history.heads))
+  })
+
+  it('seals a checkpoint spanning multiple pages and accepts an action observing that new head', async () => {
+    const firstBody = { review: 1 }
+    const firstRevision = await revision(history.state, { kind: 'policy', body: firstBody,
+      policyHash: await authority.observerPolicyHash(firstBody) }, history.keys.root)
+    const firstState = await authority.applyAuthorityRevision(history.state, firstRevision)
+    const secondBody = { review: 2 }
+    const secondRevision = await revision(firstState, { kind: 'policy', body: secondBody,
+      policyHash: await authority.observerPolicyHash(secondBody) }, history.keys.root)
+    const secondState = await authority.applyAuthorityRevision(firstState, secondRevision)
+    const leaves = [...history.leaves, authority.authorityRevisionLeaf(firstRevision), authority.authorityRevisionLeaf(secondRevision)]
+    const spanning = await checkpoint(leaves, secondState, history.heads[7]!, history.keys.rotated)
+    const session = await acceptedPrefix(7)
+    await session.appendLeaves([leaves[7]!], spanning)
+    await session.appendLeaves([leaves[8]!], spanning)
+    expect(session.snapshot().size).toBe(7)
+    expect((await session.sealCheckpoint(spanning)).size).toBe(9)
+    const signed = await action(secondState, spanning, history.keys.alice, ALICE,
+      '7'.repeat(64), history.second.integrated)
+    leaves.push(authority.governanceCompletionLeaf(signed))
+    const last = await checkpoint(leaves, secondState, spanning, history.keys.rotated)
+    await session.appendLeaves([leaves[9]!], last)
+    expect((await session.sealCheckpoint(last)).size).toBe(10)
+    expect(session.snapshot()).toEqual(await authority.replayGovernanceHistory(history.signedAnchor,
+      history.pin, leaves, [...history.heads, spanning, last]))
+  })
+
+  it('rejects pages crossing the declared checkpoint boundary and poisons the session', async () => {
+    const session = await authority.createGovernanceReplaySession(history.signedAnchor, history.pin, history.heads[0]!)
+    await expect(session.appendLeaves(history.leaves.slice(0, 2), history.heads[1]!)).rejects.toThrow(/boundary/)
+    expect(() => session.snapshot()).toThrow(/failed session/)
+    await expect(session.appendLeaves([history.leaves[0]!], history.heads[1]!)).rejects.toThrow(/failed session/)
+  })
+
+  it('requires exact tentative size and target identity before accepting a checkpoint', async () => {
+    const short = await authority.createGovernanceReplaySession(history.signedAnchor, history.pin, history.heads[0]!)
+    await expect(short.sealCheckpoint(history.heads[1]!)).rejects.toThrow(/size/)
+    expect(() => short.snapshot()).toThrow(/failed session/)
+
+    const changed = await authority.createGovernanceReplaySession(history.signedAnchor, history.pin, history.heads[0]!)
+    await changed.appendLeaves([history.leaves[0]!], history.heads[1]!)
+    await expect(changed.sealCheckpoint(history.heads[2]!)).rejects.toThrow(/target/)
+    expect(() => changed.snapshot()).toThrow(/failed session/)
+  })
+
+  it('copies caller-owned leaf bytes before an asynchronous append can observe mutation', async () => {
+    const session = await authority.createGovernanceReplaySession(history.signedAnchor, history.pin, history.heads[0]!)
+    const owned = new Uint8Array(history.leaves[0]!)
+    const pending = session.appendLeaves([owned], history.heads[1]!)
+    owned[0] = owned[0]! ^ 1
+    await pending
+    expect((await session.sealCheckpoint(history.heads[1]!)).size).toBe(1)
+  })
+
+  it('rejects noncanonical, reordered and skipped history before coverage advances', async () => {
+    const changed = await acceptedPrefix(0)
+    const noncanonical = new Uint8Array([...history.leaves[0]!, 32])
+    await expect(changed.appendLeaves([noncanonical], history.heads[1]!)).rejects.toThrow(/canonical/)
+    expect(() => changed.snapshot()).toThrow(/failed session/)
+
+    const reordered = await acceptedPrefix(0)
+    await expect(reordered.appendLeaves([history.leaves[1]!], history.heads[1]!)).rejects.toThrow()
+    expect(() => reordered.snapshot()).toThrow(/failed session/)
+
+    const skipped = await acceptedPrefix(0)
+    await expect(skipped.appendLeaves([history.leaves[0]!], history.heads[2]!)).rejects.toThrow(/forks/)
+    expect(() => skipped.snapshot()).toThrow(/failed session/)
+  })
+
+  it('checks the signer authorized after a rotation leaf, including across a tentative page', async () => {
+    const valid = await acceptedPrefix(5)
+    await valid.appendLeaves([history.leaves[5]!], history.heads[6]!)
+    expect(valid.snapshot().size).toBe(5)
+    expect((await valid.sealCheckpoint(history.heads[6]!)).size).toBe(6)
+
+    const stale = await authority.signCheckpoint({ ...history.heads[6]!.statement,
+      signerKeyId: await authority.signingKeyId(history.keys.provider.publicKey) }, history.keys.provider)
+    const rejected = await acceptedPrefix(5)
+    await rejected.appendLeaves([history.leaves[5]!], stale)
+    await expect(rejected.sealCheckpoint(stale)).rejects.toThrow(/disagrees/)
+    expect(() => rejected.snapshot()).toThrow(/failed session/)
+  })
+
+  it('rejects a duplicate operation and a future observed checkpoint in tentative actions', async () => {
+    const prefix = await acceptedPrefix(7)
+    const duplicate = await action(history.state, history.heads[7]!, history.keys.alice, ALICE,
+      history.first.signed.statement.operationId, history.second.integrated)
+    const duplicateLeaves = [...history.leaves, authority.governanceCompletionLeaf(duplicate)]
+    const duplicateHead = await checkpoint(duplicateLeaves, history.state, history.heads[7]!, history.keys.rotated)
+    await expect(prefix.appendLeaves([duplicateLeaves[7]!], duplicateHead)).rejects.toThrow(/Duplicate operation/)
+    expect(() => prefix.snapshot()).toThrow(/failed session/)
+
+    const future = await authority.signGovernanceAction({ ...history.second.signed.statement,
+      operationId: '9'.repeat(64), observedCheckpointHash: WRONG,
+      previousActionHash: history.second.integrated.actionHash,
+      previousReceipt: history.second.integrated }, history.keys.alice)
+    const futureLeaves = [...history.leaves, authority.governanceCompletionLeaf(future)]
+    const futureHead = await checkpoint(futureLeaves, history.state, history.heads[7]!, history.keys.rotated)
+    const rejected = await acceptedPrefix(7)
+    await expect(rejected.appendLeaves([futureLeaves[7]!], futureHead)).rejects.toThrow(/unauthenticated checkpoint/)
+    expect(() => rejected.snapshot()).toThrow(/failed session/)
+  })
+
+  it('rejects a changed prior receipt and bounded-page overflows', async () => {
+    const prior = { ...history.second.integrated, leafHash: WRONG }
+    const signed = await action(history.state, history.heads[7]!, history.keys.alice, ALICE,
+      '8'.repeat(64), prior)
+    const leaves = [...history.leaves, authority.governanceCompletionLeaf(signed)]
+    const head = await checkpoint(leaves, history.state, history.heads[7]!, history.keys.rotated)
+    const receiptSession = await acceptedPrefix(7)
+    await expect(receiptSession.appendLeaves([leaves[7]!], head)).rejects.toThrow(/receipt mismatch/)
+
+    const tooMany = await acceptedPrefix(0)
+    await expect(tooMany.appendLeaves(Array.from({ length: 65 }, () => history.leaves[0]!),
+      history.heads[1]!)).rejects.toThrow(/bounded dense page leaf/)
+    const tooLarge = await acceptedPrefix(0)
+    await expect(tooLarge.appendLeaves(Array.from({ length: 11 }, () => new Uint8Array(24 * 1024)),
+      history.heads[1]!)).rejects.toThrow(/256 KiB/)
+  })
+
+  it('poisons concurrent use so neither overlapping call reports accepted progress', async () => {
+    const session = await acceptedPrefix(0)
+    const first = session.appendLeaves([history.leaves[0]!], history.heads[1]!)
+    const second = session.sealCheckpoint(history.heads[1]!)
+    await expect(second).rejects.toThrow(/failed session/)
+    await expect(first).rejects.toThrow(/failed session/)
+    expect(() => session.snapshot()).toThrow(/failed session/)
+  })
+})
