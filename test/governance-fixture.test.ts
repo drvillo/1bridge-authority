@@ -215,5 +215,23 @@ describe('mixed governance history fixture', () => {
       previousActionHash: receipts.aliceReceipt1.actionHash }, keys.alice)).rejects.toThrow()
   })
 
-  it.todo('replay every mixed leaf and checkpoint from the independent pin, enforcing historical signer, root, policy, receipt ancestry and one actor-key stream head')
+  it('replays the mixed main chain from the independent pin', async () => {
+    const { signedAnchor, pin, leaves, heads, states, actions, keys } = fixture
+    const checkpoints = [heads.genesis, heads.h1, heads.h2, heads.h3, heads.h4,
+      heads.h5, heads.h6, heads.h7, heads.h8]
+    const replayed = await api.replayGovernanceHistory(signedAnchor, pin, leaves, checkpoints)
+    const final = api.authorityStateSnapshot(states.afterRevoke)
+    expect(replayed).toMatchObject({
+      feedId: FEED, size: leaves.length, checkpointHash: await api.checkpointHash(heads.h8.statement),
+      authorityRoot: final.authorityRoot, authorityRevision: final.revision,
+      authorityRevisionHash: final.revisionHash, policyEpoch: final.policyEpoch,
+      observerPolicyHash: final.observerPolicyHash,
+    })
+    expect(replayed.actorHeads).toEqual([
+      { actorKeyId: await api.signingKeyId(keys.alice.publicKey),
+        actionHash: await api.governanceActionHash(actions.alice2.statement) },
+      { actorKeyId: await api.signingKeyId(keys.bob.publicKey),
+        actionHash: await api.governanceActionHash(actions.bob1.statement) },
+    ].sort((a, b) => a.actorKeyId.localeCompare(b.actorKeyId)))
+  })
 })
