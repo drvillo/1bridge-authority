@@ -1,6 +1,6 @@
 # Authority and observation protocol blueprint
 
-Status: planned layers beyond the history foundation. These records are not yet implemented exports. Nothing in this document claims full-library readiness, cryptographic review or deployed 1bridge support.
+Status: shared design. History, ordered-map proofs, signed checkpoints, pinned authority lifecycle, evidence commitments and blind proof-access primitives have implemented exports; action completion, observer coverage, private evidence bodies and app storage remain planned. Nothing in this document claims full-library readiness, cryptographic review or deployed 1bridge support.
 
 ## Shared ownership
 
@@ -18,9 +18,9 @@ Native ECDSA P-256/SHA-256 signing uses WebCrypto's fixed 64-byte IEEE-P1363 rep
 
 ## Root and delegation
 
-A separately customer-held AuthorityAnchor fixes protocol version, workspace/log identity, customer-root public key, initial delegated actor-signing keys/capabilities, independent observer configuration when chosen, policy epoch and recovery-authority public keys. The initial root pin comes from independently authenticated configuration/ceremony, not a replacement key returned by the provider.
+A separately customer-held AuthorityAnchor fixes protocol version, workspace/log identity, customer-root public key, an initially empty actor map, an initial observer-policy commitment (`null` until configured), policy epoch, recovery-authority public key and the initial provider checkpoint-signing key. Root and recovery keys both prove possession over the anchor. Every actor binding is a separately signed revision. The initial anchor pin comes from independently authenticated configuration/ceremony, not a replacement key returned by the provider; the replay API requires that expected pin. Publisher-key rotation requires a customer-root-signed history transition; a provider-supplied replacement key is never trusted by itself.
 
-Delegations bind exact subject/key/version, scope, permitted actions and validity. Historical replay evaluates authorization at that revision, not mutable present-day server role fields. Recovery-authority resets supersede exposed paths with explicit epoch/predecessor binding; compromised online actors cannot authorize their own independent recovery.
+Delegations bind exact subject/key/version, scope and sorted unique permitted action-class identifiers. V1 validity runs from accepted binding to revocation/reset, without a wall-clock expiry. Revocation leaves a signed tombstone and regrant requires a fresh key/higher version. Historical replay evaluates authorization at that revision, not mutable present-day server role fields. Recovery-authority resets supersede exposed paths with explicit epoch/predecessor binding, fresh root/recovery key possession proofs and non-reuse of retired keys; compromised online actors cannot authorize their own independent recovery. Root-signed audit-policy changes update a commitment and policy epoch without gating release.
 
 The product supplies role/action semantics to a common typed verifier instead of hardcoding a second permission system in each route. Baseline access controls remain operationally enforced; signed authority supplies independent evidence.
 
@@ -28,7 +28,7 @@ The product supplies role/action semantics to a common typed verifier instead of
 
 Use a deterministic balanced ordered map over unique scoped subjects, including signed key/delegation/revocation state. Hash node domain, subject, record commitment and child roots. Presence reveals a selected record/path; absence proves an ordered search terminates at an authenticated empty boundary. Enforce ordering, uniqueness and exact path direction; arbitrary leaf membership is insufficient for absence/currentness.
 
-Each authority revision commits expected predecessor and resulting map root into the RFC 9162 chronological log. The observer reconstructs/compares both. The initial snapshot method rebuilds O(N); no incremental O(log N) update claim. Complete canonical data is retained so cached nodes can be reconstructed.
+Each authority revision commits expected predecessor and resulting map root into one exact canonical RFC 9162 chronological leaf. The observer replays mixed leaves in index order and accepts a signed checkpoint only when reconstructed history size/root **and** authority map root/policy epoch match its statement. Checkpoint-signature/consistency verification alone is insufficient. The initial snapshot method rebuilds O(N); no incremental O(log N) update claim. Complete canonical data is retained so cached nodes can be reconstructed.
 
 ## Attributable action and completion
 
@@ -50,7 +50,7 @@ The independent archive option supplies client-originated, asynchronously queued
 
 Approvals remain attributable. Private evidence uses independently salted commitments and encrypted bodies; selected openings reveal only required material. An observer validates only the policy material available to its configured audience. Opaque identifiers and blind tokens do not make revealed approvals or network metadata anonymous.
 
-ProofAccessToken follows RFC 9474 ordinary RSA blind signatures with randomized preparation. Use a dedicated, customer-certified shared capability/expiry/audience issuer-key cohort; unique per-user keys are forbidden by the intended privacy profile. Token randomness is independently generated and one-use redemption is atomic. The signer never blindly approves arbitrary governance data.
+ProofAccessToken follows RFC 9474 ordinary RSA blind signatures with randomized preparation. Use one dedicated, customer-certified issuer key per exact workspace/capability/audience/validity cohort; the key must never be certified for a second scope or renewed into a later window. Redemption checks the expected certificate and key, not any certificate naming a verifying key. Unique per-user keys are forbidden by the intended privacy profile. Token randomness is independently generated and one-use redemption is atomic. The signer never blindly approves arbitrary governance data.
 
 Private RSA operations use the server's native cryptographic primitive under a separate Node entry point. No JavaScript private exponent arithmetic or production-security claim from functional tests. Client public blinding/unblinding/PSS encoding must match exact RFC vectors; native final RSA-PSS verification and adversarial keys/outputs are required.
 
