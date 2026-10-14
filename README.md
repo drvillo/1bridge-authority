@@ -15,6 +15,15 @@ pnpm typecheck
 pnpm build
 ```
 
+Git consumers must pin an immutable commit and allow this first-party package's `prepare` build under pnpm 10. In the consumer's `pnpm-workspace.yaml`:
+
+```yaml
+onlyBuiltDependencies:
+  - '@drvillo/1bridge-authority'
+```
+
+Then install `github:drvillo/1bridge-authority#<reviewed-commit>`. A fresh consumer install without the allowlist refuses the build; a local Git-commit install with the allowlist loaded both the root and Node-only `./server` exports. This is package-consumption guidance, not product-integration readiness.
+
 Core modules use native WebCrypto with no runtime dependencies. Merkle proofs authenticate a supplied history; they cannot discover an entirely hidden history without independent evidence. Signature authorization and current-state discovery are separate layers.
 
 See the profile documents under `docs/` for construction, test coverage and limits. The package test, typecheck and build gates pass on Node 26.5. Selected compiled-module browser smoke checks exercised the portable primitives, pinned authority anchor and blind-token round trips in Chromium, Firefox and WebKit. These are not full browser policy/workflow evaluations or a formal security proof. In particular, product issuance eligibility, cohort certification and atomic one-use redemption are not implemented by this library.
