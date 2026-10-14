@@ -2,6 +2,14 @@ import { canonicalBytes } from './canonical.js'
 import { decodeBase64Url, encodeBase64Url } from './encoding.js'
 import { sha256, validHash, type Hash } from './hash.js'
 
+declare const evidenceSaltBrand: unique symbol
+
+export interface EvidenceSalt {
+  readonly [evidenceSaltBrand]: true
+}
+
+const saltBytesByHandle = new WeakMap<EvidenceSalt, Uint8Array>()
+
 function preimage(audienceId: string, valueBytes: Uint8Array, saltBytes: Uint8Array): Uint8Array {
   const bytes = new Uint8Array(69 + valueBytes.length)
   bytes[0] = 0x04
@@ -14,16 +22,26 @@ function preimage(audienceId: string, valueBytes: Uint8Array, saltBytes: Uint8Ar
   return bytes
 }
 
-export function createEvidenceSalt(): string {
-  return encodeBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(32)))
+export function createEvidenceSalt(): EvidenceSalt {
+  const saltBytes = globalThis.crypto.getRandomValues(new Uint8Array(32))
+  const handle = Object.freeze({}) as EvidenceSalt
+  saltBytesByHandle.set(handle, saltBytes)
+  return handle
 }
 
-export async function commitEvidence(audienceId: string, value: unknown, salt: string): Promise<Hash> {
+export function exportEvidenceSalt(handle: EvidenceSalt): string {
+  const saltBytes = saltBytesByHandle.get(handle)
+  if (!saltBytes) throw new TypeError('Expected a live evidence salt handle')
+  return encodeBase64Url(saltBytes)
+}
+
+export async function commitEvidence(audienceId: string, value: unknown, handle: EvidenceSalt): Promise<Hash> {
   if (!validHash(audienceId)) throw new TypeError('Expected 64 lowercase hexadecimal audience characters')
-  const saltBytes = decodeBase64Url(salt, 32)
-  if (saltBytes.length !== 32) throw new TypeError('Expected 32-byte evidence salt')
   const valueBytes = canonicalBytes(value)
+  const saltBytes = saltBytesByHandle.get(handle)
+  if (!saltBytes) throw new TypeError('Expected a live evidence salt handle')
   const bytes = preimage(audienceId, valueBytes, saltBytes)
+  saltBytesByHandle.delete(handle)
   return sha256(bytes)
 }
 
