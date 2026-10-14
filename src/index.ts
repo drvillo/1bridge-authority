@@ -1,4 +1,5 @@
 export { hashLeaf, hashNode, type Hash } from './hash.js'
+export { orderedMapRoot, orderedMapProof, verifyOrderedMapProof, type MapEntry, type MapProof, type MapPathStep } from './ordered-map.js'
 export { merkleRoot, inclusionProof, verifyInclusion, consistencyProof, verifyConsistency } from './history.js'
 export { canonicalJson, canonicalBytes, parseCanonical, type JsonValue } from './canonical.js'
 export { encodeBase64Url, decodeBase64Url } from './encoding.js'
