@@ -19,45 +19,67 @@ function oracle(audience: string, canonical: string, salt: string): string {
 }
 
 describe('evidence commitment', () => {
+  it('does not serialize the private salt in a public commitment result', async () => {
+    const salt = authority.createEvidenceSalt()
+    const commitment = await authority.commitEvidence(audienceId, false, salt)
+    expect(commitment).toMatch(/^[0-9a-f]{64}$/)
+    expect(JSON.stringify({ commitment })).toBe(`{"commitment":"${commitment}"}`)
+    expect(JSON.stringify({ commitment })).not.toContain(salt)
+  })
+
   it('uses the exact audience, salt, length and canonical value bytes', async () => {
     expect(authority).toHaveProperty('commitEvidence')
     const value = { b: 2, a: 'ñ' }
-    const { commitment, salt } = await authority.commitEvidence(audienceId, value)
+    const salt = authority.createEvidenceSalt()
+    const commitment = await authority.commitEvidence(audienceId, value, salt)
     expect(commitment).toBe(oracle(audienceId, '{"a":"ñ","b":2}', salt))
   })
 
   it('generates a fresh canonical 32-byte salt for each commitment', async () => {
-    const first = await authority.commitEvidence(audienceId, false)
-    const second = await authority.commitEvidence(audienceId, false)
-    for (const opening of [first, second]) {
-      expect(opening.salt).toMatch(/^[A-Za-z0-9_-]{43}$/)
-      expect(Buffer.from(opening.salt, 'base64url')).toHaveLength(32)
-      expect(opening.commitment).toBe(oracle(audienceId, 'false', opening.salt))
+    const firstSalt = authority.createEvidenceSalt()
+    const secondSalt = authority.createEvidenceSalt()
+    for (const salt of [firstSalt, secondSalt]) {
+      expect(salt).toMatch(/^[A-Za-z0-9_-]{43}$/)
+      expect(Buffer.from(salt, 'base64url')).toHaveLength(32)
     }
-    expect(first.salt).not.toBe(second.salt)
-    expect(first.commitment).not.toBe(second.commitment)
+    const firstCommitment = await authority.commitEvidence(audienceId, false, firstSalt)
+    const secondCommitment = await authority.commitEvidence(audienceId, false, secondSalt)
+    expect(firstCommitment).toBe(oracle(audienceId, 'false', firstSalt))
+    expect(secondCommitment).toBe(oracle(audienceId, 'false', secondSalt))
+    expect(firstSalt).not.toBe(secondSalt)
+    expect(firstCommitment).not.toBe(secondCommitment)
   })
 
   it.each(['', 'a'.repeat(63), 'A'.repeat(64), 'g'.repeat(64), 7, null])('rejects malformed audience %s', async (badAudience) => {
-    await expect(authority.commitEvidence(badAudience as string, 1)).rejects.toThrow()
+    await expect(authority.commitEvidence(badAudience as string, 1, authority.createEvidenceSalt())).rejects.toThrow()
   })
 
   it.each([undefined, NaN, -0, 1.5, () => 1, { x: undefined }, 'x'.repeat(1024 * 1024)])('rejects unsupported value #%#', async (value) => {
-    await expect(authority.commitEvidence(audienceId, value)).rejects.toThrow()
+    await expect(authority.commitEvidence(audienceId, value, authority.createEvidenceSalt())).rejects.toThrow()
+  })
+
+  it('rejects malformed supplied salts', async () => {
+    const salt = authority.createEvidenceSalt()
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    const noncanonical = salt.slice(0, -1) + alphabet[alphabet.indexOf(salt.at(-1)!) + 1]
+    for (const malformed of ['', salt + '=', salt.slice(0, -1), salt + 'AA', noncanonical, null, 7]) {
+      await expect(authority.commitEvidence(audienceId, 1, malformed as string)).rejects.toThrow()
+    }
   })
 
   it('snapshots a caller-owned value before the first asynchronous digest', async () => {
     const value = { answer: 1 }
-    const pending = authority.commitEvidence(audienceId, value)
+    const salt = authority.createEvidenceSalt()
+    const pending = authority.commitEvidence(audienceId, value, salt)
     value.answer = 2
-    const opening = await pending
-    expect(opening.commitment).toBe(oracle(audienceId, '{"answer":1}', opening.salt))
+    expect(await pending).toBe(oracle(audienceId, '{"answer":1}', salt))
   })
 
   it('verifies a selected opening and rejects a changed audience, value, salt or commitment', async () => {
     expect(authority).toHaveProperty('verifyEvidenceOpening')
     const value = { answer: 42 }
-    const { commitment, salt } = await authority.commitEvidence(audienceId, value)
+    const salt = authority.createEvidenceSalt()
+    const commitment = await authority.commitEvidence(audienceId, value, salt)
     expect(await authority.verifyEvidenceOpening(audienceId, value, salt, commitment)).toBe(true)
     expect(await authority.verifyEvidenceOpening(otherAudience, value, salt, commitment)).toBe(false)
     expect(await authority.verifyEvidenceOpening(audienceId, { answer: 43 }, salt, commitment)).toBe(false)
@@ -66,7 +88,8 @@ describe('evidence commitment', () => {
   })
 
   it('returns false for malformed or noncanonical openings', async () => {
-    const { commitment, salt } = await authority.commitEvidence(audienceId, 7)
+    const salt = authority.createEvidenceSalt()
+    const commitment = await authority.commitEvidence(audienceId, 7, salt)
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
     const lastIndex = alphabet.indexOf(salt.at(-1)!)
     const noncanonical = salt.slice(0, -1) + alphabet[lastIndex + 1]
@@ -80,7 +103,8 @@ describe('evidence commitment', () => {
   })
 
   it('returns false for values outside the canonical profile', async () => {
-    const { commitment, salt } = await authority.commitEvidence(audienceId, null)
+    const salt = authority.createEvidenceSalt()
+    const commitment = await authority.commitEvidence(audienceId, null, salt)
     const cycle: unknown[] = []
     cycle.push(cycle)
     const getter = Object.defineProperty({}, 'x', { get: () => 1 })
@@ -91,7 +115,8 @@ describe('evidence commitment', () => {
 
   it('snapshots the opening value before the first asynchronous digest', async () => {
     const value = { answer: 1 }
-    const { commitment, salt } = await authority.commitEvidence(audienceId, value)
+    const salt = authority.createEvidenceSalt()
+    const commitment = await authority.commitEvidence(audienceId, value, salt)
     const pending = authority.verifyEvidenceOpening(audienceId, value, salt, commitment)
     value.answer = 2
     expect(await pending).toBe(true)

@@ -2,11 +2,6 @@ import { canonicalBytes } from './canonical.js'
 import { decodeBase64Url, encodeBase64Url } from './encoding.js'
 import { sha256, validHash, type Hash } from './hash.js'
 
-export interface EvidenceCommitment {
-  commitment: Hash
-  salt: string
-}
-
 function preimage(audienceId: string, valueBytes: Uint8Array, saltBytes: Uint8Array): Uint8Array {
   const bytes = new Uint8Array(69 + valueBytes.length)
   bytes[0] = 0x04
@@ -19,13 +14,17 @@ function preimage(audienceId: string, valueBytes: Uint8Array, saltBytes: Uint8Ar
   return bytes
 }
 
-export async function commitEvidence(audienceId: string, value: unknown): Promise<EvidenceCommitment> {
+export function createEvidenceSalt(): string {
+  return encodeBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(32)))
+}
+
+export async function commitEvidence(audienceId: string, value: unknown, salt: string): Promise<Hash> {
   if (!validHash(audienceId)) throw new TypeError('Expected 64 lowercase hexadecimal audience characters')
+  const saltBytes = decodeBase64Url(salt, 32)
+  if (saltBytes.length !== 32) throw new TypeError('Expected 32-byte evidence salt')
   const valueBytes = canonicalBytes(value)
-  const saltBytes = globalThis.crypto.getRandomValues(new Uint8Array(32))
-  const salt = encodeBase64Url(saltBytes)
   const bytes = preimage(audienceId, valueBytes, saltBytes)
-  return { commitment: await sha256(bytes), salt }
+  return sha256(bytes)
 }
 
 export async function verifyEvidenceOpening(

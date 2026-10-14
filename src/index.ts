@@ -4,4 +4,4 @@ export { merkleRoot, inclusionProof, verifyInclusion, consistencyProof, verifyCo
 export { canonicalJson, canonicalBytes, parseCanonical, type JsonValue } from './canonical.js'
 export { encodeBase64Url, decodeBase64Url } from './encoding.js'
 export { generateSigningKey, exportSigningPublicKey, importSigningPublicKey, exportSigningPrivateKey, importSigningPrivateKey, signingKeyId, signRecord, verifyRecord } from './signatures.js'
-export { commitEvidence, verifyEvidenceOpening, type EvidenceCommitment } from './evidence-commitment.js'
+export { createEvidenceSalt, commitEvidence, verifyEvidenceOpening } from './evidence-commitment.js'
