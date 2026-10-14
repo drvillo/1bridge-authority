@@ -280,6 +280,22 @@ export async function signAuthorityRevision(statement: AuthorityRevision, signer
   if (!await verifyRecord('authority.revision', snapshot, signed.signature, keys.publicKey)) throw new TypeError('Revision signing pair mismatch')
   return snapshotSigned(signed)
 }
+export async function signAuthorityBindingRevision(state: AuthorityState, binding: ActiveBinding, rootPair: CryptoKeyPair): Promise<SignedAuthorityRevision> {
+  const current = internal(state)
+  const proposed = snapshotBinding(binding)
+  if (proposed.status !== 'active') throw new TypeError('Expected active binding')
+  const bindings = new Map(current.bindings)
+  bindings.set(proposed.subjectId, proposed)
+  const statement: AuthorityRevision = {
+    version: 1, feedId: current.anchor.feedId, workspaceId: current.anchor.workspaceId,
+    number: current.revision + 1, previous: current.revisionHash, previousRoot: current.authorityRoot,
+    expectedPolicyEpoch: current.policyEpoch, operation: { kind: 'bind', binding: proposed },
+    authorityRoot: await mapRoot(bindings), policyEpoch: current.policyEpoch, signerKeyId: current.rootKeyId,
+  }
+  const signed = await signAuthorityRevision(statement, rootPair)
+  await applyAuthorityRevision(state, signed)
+  return signed
+}
 export function authorityRevisionLeaf(revision: SignedAuthorityRevision): Uint8Array {
   const signed = snapshotSigned(revision)
   return canonicalBytes({ version: 1, kind: 'authority.revision', revision: signed })

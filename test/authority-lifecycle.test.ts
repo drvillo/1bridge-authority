@@ -156,6 +156,27 @@ describe('customer authority lifecycle', () => {
     expect(await api.authorityMapKey(SUBJECT)).not.toBe(await api.authorityMapKey(OTHER_SUBJECT))
   })
 
+  it('constructs a root-signed binding from verified state and refuses stale reuse', async () => {
+    const { state } = await initial()
+    const binding = await active()
+    const signed = await api.signAuthorityBindingRevision(state, binding, root)
+    expect(signed.statement.operation).toEqual({ kind: 'bind', binding })
+    expect(signed.statement.previous).toBe(api.authorityStateSnapshot(state).revisionHash)
+    const next = await api.applyAuthorityRevision(state, signed)
+    expect(api.authorityStateSnapshot(next).bindings).toEqual([binding])
+    await expect(api.applyAuthorityRevision(next, signed)).rejects.toThrow()
+    await expect(api.signAuthorityBindingRevision(state, binding, other)).rejects.toThrow()
+    await expect(api.signAuthorityBindingRevision(next, binding, root)).rejects.toThrow()
+  })
+
+  it('refuses a binding revision when its map commitment is changed', async () => {
+    const { state } = await initial()
+    const signed = await api.signAuthorityBindingRevision(state, await active(), root)
+    await expect(api.applyAuthorityRevision(state, { ...signed, statement: {
+      ...signed.statement, authorityRoot: HASH,
+    } })).rejects.toThrow()
+  })
+
   it('commits the exact recipient key hash to the signed binding and permits a root-signed version update', async () => {
     let { state } = await initial()
     const unbound = await active()
