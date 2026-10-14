@@ -1,6 +1,11 @@
 export { hashLeaf, hashNode, type Hash } from './hash.js'
 export { orderedMapRoot, orderedMapProof, verifyOrderedMapProof, type MapEntry, type MapProof, type MapPathStep } from './ordered-map.js'
 export { merkleRoot, inclusionProof, verifyInclusion, consistencyProof, verifyConsistency } from './history.js'
+export { registryEntryBytes, registryCheckpointHash, signRegistryCheckpoint,
+  verifyRegistryCheckpoint, verifyRegistryExtension,
+  type RegistryEntry, type RegistryCheckpoint, type SignedRegistryCheckpoint } from './registry.js'
+export { createRegistryReplaySession, type RegistryReplaySession,
+  type RegistryReplaySnapshot } from './registry-replay.js'
 export { emptyHistoryFrontier, appendHistory, historyFrontierRoot, type HistoryFrontier } from './history-frontier.js'
 export { canonicalJson, canonicalBytes, parseCanonical, type JsonValue } from './canonical.js'
 export { encodeBase64Url, decodeBase64Url } from './encoding.js'
@@ -15,4 +20,7 @@ export { recipientKeyClaimHash, type RecipientKeyClaim } from './recipient-key.j
 export { replayGovernanceHistory, createGovernanceReplaySession, type GovernanceReplaySnapshot, type GovernanceReplaySession } from './replay.js'
 export { signObserverReport, verifyObserverReport, observerEvidenceSetDigest, observerFindingHash,
   type ObserverReportScope, type ObserverReportStatement, type SignedObserverReport } from './observer-report.js'
+export { signAggregateReport, verifyAggregateReport, aggregateFeedStatusProof,
+  verifyAggregateFeedStatus, type AggregateReportStatement, type SignedAggregateReport,
+  type AggregateFeedStatus, type AggregateFeedStatusProof } from './observer-aggregate.js'
 export { authorityId, authoritySubjectId, type AuthorityIdKind, type AuthoritySubjectIdentity } from './authority-ids.js'

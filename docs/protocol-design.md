@@ -1,6 +1,6 @@
 # Authority and observation protocol blueprint
 
-Status: shared design. History, ordered-map proofs, signed checkpoints, pinned authority lifecycle, evidence commitments, actor-signed completion/receipt primitives, complete-prefix and bounded-page process-local replay, and blind proof-access primitives have implemented exports. Observer coverage, private evidence bodies, product-effect integration and app storage remain planned. Nothing in this document claims full-library readiness, cryptographic review or deployed 1bridge support.
+Status: shared design. History, ordered-map proofs, signed checkpoints, pinned authority lifecycle, evidence commitments, actor-signed completion/receipt primitives, complete-prefix and bounded-page process-local replay, blind proof-access primitives, and a process-local shared registry replay/aggregate report contract have implemented exports. Independent shared-observer persistence, private evidence bodies, product-effect integration and app storage remain planned. Nothing in this document claims full-library readiness, cryptographic review or deployed 1bridge support.
 
 ## Shared ownership
 
@@ -39,6 +39,10 @@ CompletionReceipt binds exact action/event hash, result commitment, log leaf ind
 Clients validate and retain receipts before accepting protocol completion, keep device-scoped history pins, and include prior receipts within later signed actions. Input retries replay the same result or reject changed canonical payloads. New devices import authenticated state or bootstrap independently rather than silently resetting trust from the provider.
 
 ## Observer coverage
+
+A global signed Merkle registry advertises pseudonymous feed registrations and heads to one independently configured observer. An observer pins one publisher key and signed empty registry checkpoint, replays contiguous registry entries, verifies registration possession proofs and append-only roots, then treats each advertised head as a **target** for the existing per-feed authority/action replay. Registry acceptance alone never establishes that the feed head is valid. A feed becomes aggregate-verified only when its exact advertised checkpoint is independently replayed; other registered feeds are reported pending. The aggregate report commits separate Merkle roots/counts for sorted verified and pending status rows and retained findings under the observer's distinct signing key. A customer can check a compact status inclusion proof for its pseudonymous feed. Its signature authenticates that statement, while a verifier must still obtain the underlying registry and per-feed evidence to independently check completeness and authorization.
+
+Stable pseudonymous feed IDs, public keys, action classes, causal links, event volume and cadence are necessarily public in this profile. The registry excludes customer names, contact information, plaintext evidence and secret keys. A provider can create a self-consistent invented feed; a customer must compare its independently retained anchor pin with the advertised registration. If all parties have never seen a withheld event or receipt, no registry or Merkle proof can reveal its existence. Once the observer signs an accepted head containing an event, a conflicting later branch cannot extend that witnessed prefix. An independently held later signed causal receipt can expose an omitted predecessor if the source publishes that later action.
 
 Checkpoint discovery fixes a target head. Bounded contiguous range retrieval, signature/authorization/map replay and exact consistency/inclusion checks advance a durable independent frontier. Partial progress never yields full-head certification. Polling resumes after arbitrary outages and redelivery.
 
