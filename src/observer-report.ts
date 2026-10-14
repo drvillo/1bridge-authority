@@ -45,12 +45,31 @@ function prefixed(prefix: Uint8Array, body: Uint8Array): Uint8Array {
 
 /** Commits one nonempty sorted, duplicate-free set of independently known evidence IDs. */
 export async function observerEvidenceSetDigest(hashes: readonly Hash[]): Promise<Hash> {
-  const body = canonicalBytes(hashes)
-  const copied = parseCanonical(body)
-  if (!Array.isArray(copied) || copied.length === 0 || copied.length > 10_000
-    || copied.some((hash, index) => !validHash(hash) || (index > 0 && hash <= copied[index - 1]!))) {
+  if (!Array.isArray(hashes) || Object.getPrototypeOf(hashes) !== Array.prototype
+    || hashes.length === 0 || hashes.length > 20_000
+    || Reflect.ownKeys(hashes).length !== hashes.length + 1) {
     throw new TypeError('Expected nonempty sorted unique evidence hashes')
   }
+  // Fixed-width ASCII hashes permit the same canonical JSON bytes beyond the general 1 MiB record limit.
+  const body = new Uint8Array(hashes.length * 67 + 1)
+  body[0] = 0x5b
+  let offset = 1
+  let previous: string | null = null
+  for (let index = 0; index < hashes.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(hashes, String(index))
+    const hash = descriptor?.value
+    if (!descriptor || !Object.hasOwn(descriptor, 'value') || !validHash(hash)
+      || (previous !== null && hash <= previous)) {
+      throw new TypeError('Expected nonempty sorted unique evidence hashes')
+    }
+    if (index > 0) body[offset++] = 0x2c
+    body[offset++] = 0x22
+    for (let character = 0; character < 64; character++) body[offset++] = hash.charCodeAt(character)
+    body[offset++] = 0x22
+    previous = hash
+  }
+  body[offset++] = 0x5d
+  if (offset !== body.length) throw new TypeError('Invalid evidence-set encoding')
   return sha256(prefixed(SET_PREFIX, body))
 }
 

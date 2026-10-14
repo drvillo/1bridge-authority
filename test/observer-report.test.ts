@@ -34,7 +34,7 @@ describe('independently signed observer coverage', () => {
     const hashes = ['a'.repeat(64), 'b'.repeat(64)]
     const expectedSet = createHash('sha256')
       .update('1bridge.authority/v1/observer-evidence-set\n')
-      .update(authority.canonicalBytes(hashes))
+      .update(JSON.stringify(hashes))
       .digest('hex')
     expect(await authority.observerEvidenceSetDigest(hashes)).toBe(expectedSet)
     const evidence = authority.canonicalBytes({ kind: 'observer.source_nonconformance', version: 1 })
@@ -47,6 +47,16 @@ describe('independently signed observer coverage', () => {
     await expect(authority.observerEvidenceSetDigest([hashes[1]!, hashes[0]!])).rejects.toThrow()
     await expect(authority.observerEvidenceSetDigest([hashes[0]!, hashes[0]!])).rejects.toThrow()
     await expect(authority.observerFindingHash(new TextEncoder().encode('{"version":1,"kind":"x"}'))).rejects.toThrow()
+  })
+
+  it('commits the maximum combined receipt and source-finding set', async () => {
+    const hashes = Array.from({ length: 20_000 }, (_, index) => index.toString(16).padStart(64, '0'))
+    const expected = createHash('sha256')
+      .update('1bridge.authority/v1/observer-evidence-set\n')
+      .update(JSON.stringify(hashes))
+      .digest('hex')
+    expect(await authority.observerEvidenceSetDigest(hashes)).toBe(expected)
+    await expect(authority.observerEvidenceSetDigest([...hashes, 'f'.repeat(64)])).rejects.toThrow()
   })
 
   it('binds a replayed exact checkpoint and admits explicitly source-only coverage', async () => {
