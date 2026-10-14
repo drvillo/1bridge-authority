@@ -3,7 +3,7 @@ import { applyAuthorityRevision, authorityRevisionLeaf, authorityStateSnapshot, 
   type SignedAuthorityAnchor, type SignedAuthorityRevision } from './authority-lifecycle.js'
 import { canonicalBytes, parseCanonical } from './canonical.js'
 import { checkpointHash, verifyCheckpoint, type SignedCheckpoint } from './checkpoint.js'
-import { verifyReceiptInclusion } from './completion-receipt.js'
+import { snapshotCompletionReceipt, verifyReceiptInclusion, type CompletionReceipt } from './completion-receipt.js'
 import { validHash, type Hash } from './hash.js'
 import { appendHistory, emptyHistoryFrontier, historyFrontierRoot } from './history-frontier.js'
 import { importSigningPublicKey } from './signatures.js'
@@ -35,6 +35,7 @@ type AcceptedMeta = Omit<GovernanceReplaySnapshot, 'actorHeads'>
 export interface GovernanceReplaySession {
   appendLeaves(leaves: readonly Uint8Array[], nextCheckpoint: SignedCheckpoint): Promise<void>
   sealCheckpoint(nextCheckpoint: SignedCheckpoint): Promise<void>
+  verifyReceipt(receipt: CompletionReceipt, leafBytes: Uint8Array): Promise<boolean>
   snapshot(): GovernanceReplaySnapshot
 }
 
@@ -134,6 +135,25 @@ class ReplaySession implements GovernanceReplaySession {
       this.#snapshotCache = Object.freeze({ ...this.#accepted, actorHeads: Object.freeze(actorHeads) })
     }
     return this.#snapshotCache
+  }
+
+  /** Checks an externally supplied receipt against this session's already authenticated chain. */
+  async verifyReceipt(value: CompletionReceipt, leafBytes: Uint8Array): Promise<boolean> {
+    return this.#exclusive(async () => {
+      try {
+        const receipt = snapshotCompletionReceipt(value)
+        if (!(leafBytes instanceof Uint8Array) || leafBytes.length === 0 || leafBytes.length > MAX_LEAF_BYTES) {
+          return false
+        }
+        const leaf = new Uint8Array(leafBytes)
+        const acceptedSize = this.#accepted.size
+        if (receipt.leafIndex >= acceptedSize) return false
+        const headHash = await checkpointHash(receipt.checkpoint.statement)
+        const acceptedHead = this.#acceptedHeads.get(headHash)
+        if (!acceptedHead || acceptedHead.signed.statement.size > acceptedSize) return false
+        return verifyReceiptInclusion(receipt, leaf, acceptedHead.signed)
+      } catch { return false }
+    })
   }
 
   async #exclusive<T>(work: () => Promise<T>): Promise<T> {

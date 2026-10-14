@@ -167,6 +167,38 @@ describe('pinned mixed-history replay', () => {
     ].sort((a, b) => a.actorKeyId.localeCompare(b.actorKeyId)))
   })
 
+  it('reconciles a retained receipt only against an accepted replay checkpoint', async () => {
+    const session = await authority.createGovernanceReplaySession(history.signedAnchor,
+      history.pin, history.heads[0]!)
+    expect(typeof session.verifyReceipt).toBe('function')
+    expect(await session.verifyReceipt(history.first.integrated, history.first.leaf)).toBe(false)
+    for (let index = 1; index < history.heads.length; index++) {
+      await session.appendLeaves([history.leaves[index - 1]!], history.heads[index]!)
+      await session.sealCheckpoint(history.heads[index]!)
+    }
+    expect(await session.verifyReceipt(history.first.integrated, history.first.leaf)).toBe(true)
+    expect(await session.verifyReceipt(history.second.integrated, history.second.leaf)).toBe(true)
+    expect(await session.verifyReceipt(history.first.integrated, history.other.leaf)).toBe(false)
+    expect(await session.verifyReceipt({ ...history.first.integrated,
+      checkpoint: history.heads.at(-1)! }, history.first.leaf)).toBe(false)
+    expect(await session.verifyReceipt({ ...history.first.integrated,
+      leafIndex: history.first.integrated.leafIndex + 1 }, history.first.leaf)).toBe(false)
+    expect(session.snapshot().size).toBe(history.leaves.length)
+  })
+
+  it('does not report a receipt verified after concurrent session mutation', async () => {
+    const session = await authority.createGovernanceReplaySession(history.signedAnchor,
+      history.pin, history.heads[0]!)
+    for (let index = 1; index < history.heads.length; index++) {
+      await session.appendLeaves([history.leaves[index - 1]!], history.heads[index]!)
+      await session.sealCheckpoint(history.heads[index]!)
+    }
+    const checking = session.verifyReceipt(history.first.integrated, history.first.leaf)
+    await expect(session.appendLeaves([history.first.leaf], history.heads.at(-1)!))
+      .rejects.toThrow()
+    await expect(checking).rejects.toThrow(/failed session/i)
+  })
+
   it('rejects a valid provider signature over the wrong authority root or policy epoch', async () => {
     const final = history.heads.at(-1)!
     for (const changed of [
@@ -241,6 +273,16 @@ describe('pinned mixed-history replay', () => {
     const replayedCanonical = await authority.replayGovernanceHistory(history.signedAnchor, history.pin,
       canonicalLeaves, [...history.heads, observed])
     expect(replayedCanonical.size).toBe(8)
+    const canonicalSession = await authority.createGovernanceReplaySession(history.signedAnchor,
+      history.pin, history.heads[0]!)
+    for (let index = 1; index < history.heads.length; index++) {
+      await canonicalSession.appendLeaves([history.leaves[index - 1]!], history.heads[index]!)
+      await canonicalSession.sealCheckpoint(history.heads[index]!)
+    }
+    await canonicalSession.appendLeaves([authority.authorityRevisionLeaf(canonicalRevision)], observed)
+    await canonicalSession.sealCheckpoint(observed)
+    expect(await canonicalSession.verifyReceipt(branchReceipt, history.second.leaf)).toBe(false)
+    expect(await canonicalSession.verifyReceipt(history.second.integrated, history.second.leaf)).toBe(true)
     const signed = await action(canonicalState, observed, history.keys.alice, ALICE,
       '5'.repeat(64), branchReceipt)
     const leaves = [...canonicalLeaves, authority.governanceCompletionLeaf(signed)]
