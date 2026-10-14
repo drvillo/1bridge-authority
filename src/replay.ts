@@ -17,6 +17,7 @@ const MAX_PAGE_BYTES = 256 * 1024
 
 export interface GovernanceReplaySnapshot {
   feedId: Hash
+  anchorPin: Hash
   size: number
   checkpointHash: Hash
   authorityRoot: Hash
@@ -96,9 +97,9 @@ async function snapshotCheckpoint(value: SignedCheckpoint): Promise<{ signed: Si
 }
 
 function acceptedMeta(authority: Awaited<ReturnType<typeof verifyAuthorityAnchor>>,
-  size: number, headHash: Hash): AcceptedMeta {
+  size: number, headHash: Hash, anchorPin: Hash): AcceptedMeta {
   const final = authorityStateSnapshot(authority)
-  return Object.freeze({ feedId: final.feedId, size,
+  return Object.freeze({ feedId: final.feedId, anchorPin, size,
     checkpointHash: headHash, authorityRoot: final.authorityRoot,
     authorityRevision: final.revision, authorityRevisionHash: final.revisionHash,
     policyEpoch: final.policyEpoch, observerPolicyHash: final.observerPolicyHash })
@@ -250,7 +251,7 @@ class ReplaySession implements GovernanceReplaySession {
       this.#acceptedHeads.set(target.hash, { signed: head, position: headIndex })
       for (const [actorKeyId, action] of this.#tentativeActors) this.#actors.set(actorKeyId, action)
       this.#tentativeActors.clear()
-      this.#accepted = acceptedMeta(this.#authority, this.#frontier.size, target.hash)
+      this.#accepted = acceptedMeta(this.#authority, this.#frontier.size, target.hash, this.#accepted.anchorPin)
       this.#snapshotCache = null
       this.#target = null
     })
@@ -277,7 +278,7 @@ export async function createGovernanceReplaySession(signedAnchor: SignedAuthorit
     || !await verifyCheckpoint(genesis.signed, genesisKey)) {
     throw new TypeError('Invalid signed genesis checkpoint')
   }
-  const initial = acceptedMeta(authority, 0, genesis.hash)
+  const initial = acceptedMeta(authority, 0, genesis.hash, expectedPin)
   return new ReplaySession(authority, genesis.signed, genesis.hash, initial)
 }
 
