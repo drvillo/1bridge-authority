@@ -1,6 +1,7 @@
 export { hashLeaf, hashNode, type Hash } from './hash.js'
 export { orderedMapRoot, orderedMapProof, verifyOrderedMapProof, type MapEntry, type MapProof, type MapPathStep } from './ordered-map.js'
 export { merkleRoot, inclusionProof, verifyInclusion, consistencyProof, verifyConsistency } from './history.js'
+export { emptyHistoryFrontier, appendHistory, historyFrontierRoot, type HistoryFrontier } from './history-frontier.js'
 export { canonicalJson, canonicalBytes, parseCanonical, type JsonValue } from './canonical.js'
 export { encodeBase64Url, decodeBase64Url } from './encoding.js'
 export { generateSigningKey, exportSigningPublicKey, importSigningPublicKey, exportSigningPrivateKey, importSigningPrivateKey, signingKeyId, signRecord, verifyRecord } from './signatures.js'
