@@ -55,6 +55,61 @@ async function revision(state: any, operation: any, signer = root, overrides: Re
   return api.signAuthorityRevision(statement, signer)
 }
 
+interface MixedFixtureCase {
+  signedAnchor: library.SignedAuthorityAnchor
+  pin: string
+  oldHead: library.SignedCheckpoint
+  newHead: library.SignedCheckpoint
+  leaves: Uint8Array[]
+  proof: string[]
+}
+
+async function replayFixturePrefix(fixture: MixedFixtureCase, size: number) {
+  let state = await api.verifyAuthorityAnchor(fixture.signedAnchor, fixture.pin)
+  for (const leaf of fixture.leaves.slice(0, size)) {
+    const parsed = library.parseCanonical(leaf) as Record<string, any>
+    if (parsed.version !== 1) throw new TypeError('Unknown fixture leaf version')
+    if (parsed.kind === 'authority.revision' && Object.keys(parsed).sort().join(',') === 'kind,revision,version') {
+      state = await api.applyAuthorityRevision(state, parsed.revision)
+    } else if (parsed.kind === 'action.placeholder' && Object.keys(parsed).sort().join(',') === 'kind,version') {
+      // This fixed opaque leaf exercises ordering and RFC history only; no action semantics are claimed.
+      if (new TextDecoder().decode(leaf) !== library.canonicalJson({ kind: 'action.placeholder', version: 1 })) {
+        throw new TypeError('Unexpected fixture placeholder')
+      }
+    } else {
+      throw new TypeError('Unknown fixture leaf')
+    }
+  }
+  return state
+}
+
+async function verifyMixedFixtureExtension(fixture: MixedFixtureCase): Promise<boolean> {
+  try {
+    const oldSize = fixture.oldHead.statement.size
+    const newSize = fixture.newHead.statement.size
+    if (oldSize >= newSize || newSize !== fixture.leaves.length) return false
+    const oldState = api.authorityStateSnapshot(await replayFixturePrefix(fixture, oldSize))
+    const newState = api.authorityStateSnapshot(await replayFixturePrefix(fixture, newSize))
+    const oldRoot = await library.merkleRoot(fixture.leaves.slice(0, oldSize))
+    const newRoot = await library.merkleRoot(fixture.leaves)
+    const oldHead = fixture.oldHead.statement
+    const newHead = fixture.newHead.statement
+    if (oldHead.feedId !== oldState.feedId || newHead.feedId !== newState.feedId
+      || oldHead.historyRoot !== oldRoot || newHead.historyRoot !== newRoot
+      || oldHead.authorityRoot !== oldState.authorityRoot || newHead.authorityRoot !== newState.authorityRoot
+      || oldHead.policyEpoch !== oldState.policyEpoch || newHead.policyEpoch !== newState.policyEpoch
+      || oldHead.signerKeyId !== oldState.checkpointKeyId || newHead.signerKeyId !== newState.checkpointKeyId
+      || newHead.previous !== await library.checkpointHash(oldHead)) return false
+    const oldKey = await library.importSigningPublicKey(oldState.checkpointKeySpki)
+    const newKey = await library.importSigningPublicKey(newState.checkpointKeySpki)
+    return await library.verifyCheckpoint(fixture.oldHead, oldKey)
+      && await library.verifyCheckpoint(fixture.newHead, newKey)
+      && await library.verifyConsistency(oldSize, newSize, oldRoot, newRoot, fixture.proof)
+  } catch {
+    return false
+  }
+}
+
 describe('customer authority lifecycle', () => {
   it('exports the pin-first authority contract', () => {
     for (const name of ['createAuthorityAnchor', 'signAuthorityAnchor', 'anchorHash', 'verifyAuthorityAnchor',
@@ -210,8 +265,8 @@ describe('customer authority lifecycle', () => {
     expect(() => library.parseCanonical(duplicate)).toThrow()
   })
 
-  it('checks a mixed history against the authorized signer and reconstructed commitments', async () => {
-    const { state: initialState } = await initial()
+  it('accepts only ordered mixed-history extensions with authorized checkpoints', async () => {
+    const { signed, pin, state: initialState } = await initial()
     const first = await revision(initialState, { kind: 'bind', binding: await active() })
     const afterBind = await api.applyAuthorityRevision(initialState, first)
     const placeholder = library.canonicalBytes({ kind: 'action.placeholder', version: 1 })
@@ -219,34 +274,39 @@ describe('customer authority lifecycle', () => {
     const genesisHead = await library.signCheckpoint({ version: 1, feedId: FEED, size: 0,
       historyRoot: await library.merkleRoot([]), authorityRoot: api.authorityStateSnapshot(initialState).authorityRoot,
       policyEpoch: 0, signerKeyId: await library.signingKeyId(provider.publicKey), previous: null }, provider)
-    expect(await library.verifyCheckpoint(genesisHead, provider.publicKey)).toBe(true)
     const firstHead = await library.signCheckpoint({ version: 1, feedId: FEED, size: 2,
       historyRoot: await library.merkleRoot(firstLeaves), authorityRoot: api.authorityStateSnapshot(afterBind).authorityRoot,
       policyEpoch: 0, signerKeyId: await library.signingKeyId(provider.publicKey), previous: await library.checkpointHash(genesisHead.statement) }, provider)
-    expect(await library.verifyCheckpoint(firstHead, provider.publicKey)).toBe(true)
-    expect(await library.verifyCheckpointExtension(genesisHead, firstHead, [], provider.publicKey)).toBe(true)
-    expect(firstHead.statement.authorityRoot).toBe(api.authorityStateSnapshot(afterBind).authorityRoot)
+    const firstCase = { signedAnchor: signed, pin, oldHead: genesisHead, newHead: firstHead, leaves: firstLeaves,
+      proof: [] as string[] }
+    expect(await verifyMixedFixtureExtension(firstCase)).toBe(true)
     const wrongRoot = await library.signCheckpoint({ ...firstHead.statement, authorityRoot: HASH }, provider)
     const wrongEpoch = await library.signCheckpoint({ ...firstHead.statement, policyEpoch: 1 }, provider)
-    expect(await library.verifyCheckpoint(wrongRoot, provider.publicKey)).toBe(true)
-    expect(wrongRoot.statement.authorityRoot).not.toBe(api.authorityStateSnapshot(afterBind).authorityRoot)
-    expect(wrongEpoch.statement.policyEpoch).not.toBe(api.authorityStateSnapshot(afterBind).policyEpoch)
+    const wrongHistory = await library.signCheckpoint({ ...firstHead.statement, historyRoot: HASH }, provider)
     const unauthorized = await library.signCheckpoint({ ...firstHead.statement, signerKeyId: await library.signingKeyId(other.publicKey) }, other)
-    expect(await library.verifyCheckpoint(unauthorized, provider.publicKey)).toBe(false)
+    expect(await library.verifyCheckpoint(wrongRoot, provider.publicKey)).toBe(true)
+    expect(await library.verifyCheckpoint(wrongEpoch, provider.publicKey)).toBe(true)
+    expect(await verifyMixedFixtureExtension({ ...firstCase, newHead: wrongRoot })).toBe(false)
+    expect(await verifyMixedFixtureExtension({ ...firstCase, newHead: wrongEpoch })).toBe(false)
+    expect(await verifyMixedFixtureExtension({ ...firstCase, newHead: wrongHistory })).toBe(false)
+    expect(await verifyMixedFixtureExtension({ ...firstCase, newHead: unauthorized })).toBe(false)
+    expect(await verifyMixedFixtureExtension({ ...firstCase, leaves: [...firstLeaves].reverse() })).toBe(false)
+
     const rotation = { kind: 'rotate-checkpoint', checkpointKeySpki: await library.exportSigningPublicKey(other.publicKey), checkpointKeyId: await library.signingKeyId(other.publicKey) }
     const rotationRevision = await revision(afterBind, rotation)
-    const afterRotation = await api.applyAuthorityRevision(afterBind, rotationRevision)
     const allLeaves = [...firstLeaves, api.authorityRevisionLeaf(rotationRevision)]
+    const proof = await library.consistencyProof(allLeaves, 2)
     const secondHead = await library.signCheckpoint({ ...firstHead.statement, size: 3,
       historyRoot: await library.merkleRoot(allLeaves), signerKeyId: rotation.checkpointKeyId,
       previous: await library.checkpointHash(firstHead.statement) }, other)
-    expect(await library.verifyCheckpoint(secondHead, other.publicKey)).toBe(true)
-    expect(api.authorityStateSnapshot(afterRotation).checkpointKeyId).toBe(secondHead.statement.signerKeyId)
-    expect(secondHead.statement.authorityRoot).toBe(api.authorityStateSnapshot(afterRotation).authorityRoot)
-    expect(secondHead.statement.policyEpoch).toBe(api.authorityStateSnapshot(afterRotation).policyEpoch)
-    expect(await library.verifyConsistency(2, 3, firstHead.statement.historyRoot, secondHead.statement.historyRoot,
-      await library.consistencyProof(allLeaves, 2))).toBe(true)
-    expect(await library.verifyCheckpointExtension(firstHead, secondHead, await library.consistencyProof(allLeaves, 2), provider.publicKey)).toBe(false)
+    const secondCase = { signedAnchor: signed, pin, oldHead: firstHead, newHead: secondHead, leaves: allLeaves, proof }
+    expect(await verifyMixedFixtureExtension(secondCase)).toBe(true)
+    expect(await library.verifyCheckpointExtension(firstHead, secondHead, proof, provider.publicKey)).toBe(false)
+    const oldSigner = await library.signCheckpoint({ ...secondHead.statement, signerKeyId: await library.signingKeyId(provider.publicKey) }, provider)
+    const stalePredecessor = await library.signCheckpoint({ ...secondHead.statement, previous: HASH }, other)
+    expect(await verifyMixedFixtureExtension({ ...secondCase, newHead: oldSigner })).toBe(false)
+    expect(await verifyMixedFixtureExtension({ ...secondCase, newHead: stalePredecessor })).toBe(false)
+    expect(await verifyMixedFixtureExtension({ ...secondCase, proof: [HASH] })).toBe(false)
   })
 
   it('replays only against the supplied pin and isolates returned snapshots', async () => {
