@@ -6,3 +6,4 @@ export { canonicalJson, canonicalBytes, parseCanonical, type JsonValue } from '.
 export { encodeBase64Url, decodeBase64Url } from './encoding.js'
 export { generateSigningKey, exportSigningPublicKey, importSigningPublicKey, exportSigningPrivateKey, importSigningPrivateKey, signingKeyId, signRecord, verifyRecord } from './signatures.js'
 export { createEvidenceSalt, exportEvidenceSalt, commitEvidence, verifyEvidenceOpening, type EvidenceSalt } from './evidence-commitment.js'
+export { checkpointHash, signCheckpoint, verifyCheckpoint, verifyCheckpointExtension, type GovernanceCheckpoint, type SignedCheckpoint } from './checkpoint.js'
