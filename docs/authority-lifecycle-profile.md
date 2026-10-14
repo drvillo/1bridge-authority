@@ -10,10 +10,10 @@ All statements, signatures, and history leaves use the package's restricted cano
 
 `AuthorityBinding` is exactly one of:
 
-- Active: `{subjectId,keySpki,keyId,version,scope,actionClasses,status:'active'}`.
+- Active: `{subjectId,keySpki,keyId,version,scope,actionClasses,recipientKeyCommitment,status:'active'}`.
 - Tombstone: `{subjectId,keyId,version,status:'revoked'}`.
 
-`scope` is exactly `{kind:'workspace',workspaceId}` or `{kind:'vault',workspaceId,vaultId}`. `workspaceId` equals the anchor workspace. Action classes are 1–32 sorted, unique ASCII strings up to 64 bytes, matching `^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*){1,3}$`. They are opaque exact-match labels; the app must separately map routes to classes. V1 has no expiration timestamp.
+`scope` is exactly `{kind:'workspace',workspaceId}` or `{kind:'vault',workspaceId,vaultId}`. `workspaceId` equals the anchor workspace. Action classes are 1–32 sorted, unique ASCII strings up to 64 bytes, matching `^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*){1,3}$`. They are opaque exact-match labels; the app must separately map routes to classes. `recipientKeyCommitment` is mandatory and either a lowercase 64-character hash of the exact recipient claim defined in [recipient-binding-profile.md](recipient-binding-profile.md), or `null` for an actor with no authenticated recipient key. `null` never authorizes arbitrary recipient selection. A root-signed `update` may change this field only while advancing the binding version. V1 has no expiration timestamp.
 
 A map key is `SHA256(UTF8("1bridge.authority/v1/subject\n") || raw32(subjectId))`. A map value hash is `SHA256(UTF8("1bridge.authority/v1/binding\n") || canonicalBytes(binding))`. The map is sorted by derived map key and committed with `orderedMapRoot`. A revoked subject remains as a tombstone. Reset clears the current map, while retaining subject-version high water and every used key ID in replay state.
 
@@ -22,7 +22,7 @@ A map key is `SHA256(UTF8("1bridge.authority/v1/subject\n") || raw32(subjectId))
 `operation` is one exact discriminated union:
 
 - `{kind:'bind',binding:ActiveBinding}`: currently absent; version is retained high water plus one; actor key has never held any role.
-- `{kind:'update',binding:ActiveBinding}`: currently active; same key and SPKI; version increases exactly one; scope/classes may change.
+- `{kind:'update',binding:ActiveBinding}`: currently active; same key and SPKI; version increases exactly one; scope/classes/recipient-key commitment may change. The new map root commits the new claim hash. The recipient key row has a separate version counter.
 - `{kind:'revoke',binding:RevokedBinding}`: currently active; same key; version increases exactly one.
 - `{kind:'regrant',binding:ActiveBinding}`: currently revoked; fresh never-used key; version increases exactly one.
 - `{kind:'policy',body,policyHash}`: `body` is canonical JSON of at most 8192 bytes, or null. `policyHash` is null iff `body` is null; otherwise `SHA256(UTF8("1bridge.authority/v1/observer-policy\n") || canonicalBytes(body))`. The policy epoch increases exactly one; the map is unchanged. This module commits the body but does not interpret observer terms.

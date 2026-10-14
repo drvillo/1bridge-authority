@@ -26,7 +26,7 @@ beforeAll(async () => {
   state = await api.verifyAuthorityAnchor(signedAnchor, await api.anchorHash(anchor))
   const binding = { subjectId: SUBJECT, keySpki: await library.exportSigningPublicKey(actor.publicKey),
     keyId: await library.signingKeyId(actor.publicKey), version: 1,
-    scope: { kind: 'workspace', workspaceId: WORKSPACE }, actionClasses: ['document.read'], status: 'active' }
+    scope: { kind: 'workspace', workspaceId: WORKSPACE }, actionClasses: ['document.read'], recipientKeyCommitment: null, status: 'active' }
   const authorityRoot = await library.orderedMapRoot([{ key: await api.authorityMapKey(SUBJECT), valueHash: await api.authorityBindingHash(binding) }])
   const current = api.authorityStateSnapshot(state)
   const revision = await api.signAuthorityRevision({ version: 1, feedId: FEED, workspaceId: WORKSPACE,

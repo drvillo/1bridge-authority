@@ -30,7 +30,7 @@ export interface AuthorityAnchor {
 }
 export interface SignedAuthorityAnchor { anchor: AuthorityAnchor; rootSignature: string; recoverySignature: string }
 export type AuthorityScope = { kind: 'workspace'; workspaceId: Hash } | { kind: 'vault'; workspaceId: Hash; vaultId: Hash }
-export interface ActiveBinding { subjectId: Hash; keySpki: string; keyId: Hash; version: number; scope: AuthorityScope; actionClasses: string[]; status: 'active' }
+export interface ActiveBinding { subjectId: Hash; keySpki: string; keyId: Hash; version: number; scope: AuthorityScope; actionClasses: string[]; recipientKeyCommitment: Hash | null; status: 'active' }
 export interface RevokedBinding { subjectId: Hash; keyId: Hash; version: number; status: 'revoked' }
 export type AuthorityBinding = ActiveBinding | RevokedBinding
 export type AuthorityOperation =
@@ -139,13 +139,14 @@ function snapshotBinding(value: unknown): AuthorityBinding {
     return record as unknown as RevokedBinding
   }
   if (status === 'active') {
-    const record = exact(value, ['subjectId', 'keySpki', 'keyId', 'version', 'scope', 'actionClasses', 'status'])
+    const record = exact(value, ['subjectId', 'keySpki', 'keyId', 'version', 'scope', 'actionClasses', 'recipientKeyCommitment', 'status'])
     if (!validHash(record.subjectId) || !validHash(record.keyId) || !positive(record.version) || typeof record.keySpki !== 'string') throw new TypeError('Invalid active binding')
+    if (record.recipientKeyCommitment !== null && !validHash(record.recipientKeyCommitment)) throw new TypeError('Invalid recipient key commitment')
     const classes = array(record.actionClasses, 32)
     if (classes.length === 0 || classes.some(item => typeof item !== 'string' || item.length > 64 || !ACTION_CLASS.test(item))) throw new TypeError('Invalid action classes')
     for (let i = 1; i < classes.length; i++) if ((classes[i - 1] as string) >= (classes[i] as string)) throw new TypeError('Action classes must be sorted and unique')
     return { subjectId: record.subjectId, keySpki: record.keySpki, keyId: record.keyId, version: record.version,
-      scope: snapshotScope(record.scope), actionClasses: classes as string[], status: 'active' }
+      scope: snapshotScope(record.scope), actionClasses: classes as string[], recipientKeyCommitment: record.recipientKeyCommitment as Hash | null, status: 'active' }
   }
   throw new TypeError('Expected binding status')
 }

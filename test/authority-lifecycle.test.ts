@@ -35,7 +35,7 @@ async function initial() {
 async function active(subjectId = SUBJECT, pair = actor, version = 1) {
   return { subjectId, keySpki: await library.exportSigningPublicKey(pair.publicKey),
     keyId: await library.signingKeyId(pair.publicKey), version,
-    scope: { kind: 'workspace', workspaceId: WORKSPACE }, actionClasses: ['document.read'], status: 'active' }
+    scope: { kind: 'workspace', workspaceId: WORKSPACE }, actionClasses: ['document.read'], recipientKeyCommitment: null, status: 'active' }
 }
 
 async function revision(state: any, operation: any, signer = root, overrides: Record<string, unknown> = {}) {
@@ -154,6 +154,34 @@ describe('customer authority lifecycle', () => {
     state = await api.applyAuthorityRevision(state, await revision(state, { kind: 'regrant', binding: await active(SUBJECT, actor2, 4) }))
     expect(api.authorityStateSnapshot(state).bindings).toEqual([await active(SUBJECT, actor2, 4)])
     expect(await api.authorityMapKey(SUBJECT)).not.toBe(await api.authorityMapKey(OTHER_SUBJECT))
+  })
+
+  it('commits the exact recipient key hash to the signed binding and permits a root-signed version update', async () => {
+    let { state } = await initial()
+    const unbound = await active()
+    const recipientKeyCommitment = '1'.repeat(64)
+    const bound = { ...unbound, recipientKeyCommitment }
+    expect(await api.authorityBindingHash(bound)).not.toBe(await api.authorityBindingHash(unbound))
+    const first = await revision(state, { kind: 'bind', binding: bound })
+    state = await api.applyAuthorityRevision(state, first)
+    expect(api.authorityStateSnapshot(state).bindings).toEqual([bound])
+    const updated = { ...bound, version: 2, recipientKeyCommitment: '2'.repeat(64) }
+    const second = await revision(state, { kind: 'update', binding: updated })
+    const next = await api.applyAuthorityRevision(state, second)
+    expect(api.authorityStateSnapshot(next).bindings).toEqual([updated])
+    expect(api.authorityStateSnapshot(next).authorityRoot).not.toBe(api.authorityStateSnapshot(state).authorityRoot)
+    await expect(api.applyAuthorityRevision(state, { ...second, statement: { ...second.statement,
+      operation: { kind: 'update', binding: { ...updated, recipientKeyCommitment: recipientKeyCommitment } } } })).rejects.toThrow()
+  })
+
+  it('rejects omitted, invalid and extra recipient commitment fields', async () => {
+    const { state } = await initial()
+    const valid = await active()
+    const { recipientKeyCommitment: _omitted, ...missing } = valid
+    for (const binding of [missing, { ...valid, recipientKeyCommitment: 'A'.repeat(64) },
+      { ...valid, recipientKeyCommitment: undefined }, { ...valid, recipientKeyCommitment: null, extra: 1 }]) {
+      await expect(revision(state, { kind: 'bind', binding })).rejects.toThrow()
+    }
   })
 
   it('rejects sibling revisions, invalid versions, wrong signer and reused actor keys', async () => {
