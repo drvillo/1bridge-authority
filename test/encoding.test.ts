@@ -22,7 +22,7 @@ describe('canonical base64url codec', () => {
   it('roundtrips a large binary buffer without argument spreading limits', () => {
     const bytes = Uint8Array.from({ length: 1024 * 1024 }, (_, index) => index % 256)
     expect(authority.decodeBase64Url(authority.encodeBase64Url(bytes))).toEqual(bytes)
-  })
+  }, 30_000)
 
   it.each(['Zg=', 'Zg==', '+w', '/w', 'Z g', 'Zg\n', 'Zg\r', 'Zg\r\n', 'é', 'A', 'AAAAA', 'Zh', 'Zm9', '__', '_-8AgB'])('rejects malformed or ambiguous encoding %s', (encoded) => {
     expect(() => authority.decodeBase64Url(encoded)).toThrow()

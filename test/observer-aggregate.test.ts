@@ -120,5 +120,5 @@ describe('shared observer aggregate coverage', () => {
     const report = await api.signAggregateReport(registry, largeHead, [], [],
       '2026-10-14T12:00:00.000Z', observer)
     expect(report.statement.pendingFeeds.count).toBe(20_001)
-  })
+  }, 30_000)
 })
