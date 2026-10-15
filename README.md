@@ -26,6 +26,20 @@ Then install `github:drvillo/1bridge-authority#<reviewed-commit>`. A fresh consu
 
 Core modules use native WebCrypto with no runtime dependencies. `replayGovernanceHistory` authenticates a supplied complete prefix under an independently obtained customer pin and caps its input at 10,000 leaves and 32 MiB. `createGovernanceReplaySession` accepts bounded pages beyond that input ceiling in one process; it cannot resume securely from an untrusted serialized state after a serverless restart. See `docs/streaming-replay-profile.md` for tested feed shapes and capacity limits. Neither API proves that a database effect occurred, that the selected head is globally fresh, or that an entirely hidden history does not exist. A later same-key action or an independently retained receipt can expose some suppressed events; the scope and limits are in `docs/mixed-history-replay-profile.md`.
 
+`verifyGovernanceHistoryExport(retainedCheckpoint, candidateHistory)` verifies the v1 customer export format entirely offline. A consumer can parse two locally saved JSON files and call it without a 1Bridge API, database or observer connection:
+
+```ts
+import { readFileSync } from 'node:fs'
+import { verifyGovernanceHistoryExport } from '@drvillo/1bridge-authority'
+
+const retained = JSON.parse(readFileSync('retained-checkpoint.json', 'utf8'))
+const candidate = JSON.parse(readFileSync('candidate-history.json', 'utf8'))
+const result = await verifyGovernanceHistoryExport(retained, candidate)
+console.log(result.feedId, result.checkpointHash, result.retainedCheckpointHash)
+```
+
+The checkpoint and anchor pin must have been saved or authenticated outside the publisher before the later candidate is supplied. The verifier replays at most 50,000 leaves and 64 MiB of encoded history in bounded pages, verifies every historical authority/action and publisher checkpoint, and requires the exact retained signed checkpoint in the accepted chain. It cannot detect a coherent tail that nobody independently retained or witnessed, and callers should cap JSON file size before parsing untrusted files.
+
 `signObserverReport` binds a supplied replay snapshot to its exact signed checkpoint and a separately operated observer key. `verifyObserverReport` checks report syntax, pin/feed scope and the observer's signature; it does not replay the history or create an independent receipt archive. See [the report profile](docs/observer-report-profile.md) for precise claims and limits.
 
 `createRegistryReplaySession` checks a signed global append-only feed registry under one independently pinned publisher key. It verifies dual-signed feed registrations and advertised-head ordering, while the separate per-feed replay must validate each advertised head's authority/action history. `signAggregateReport` distinguishes fully replayed advertised heads from pending feeds; `aggregateFeedStatusProof` and `verifyAggregateFeedStatus` provide a compact proof for one explicit status. The status verifier requires the customer's independently expected feed ID and anchor pin to prevent substituting another feed's valid proof. `verifyAggregateReport` authenticates the observer's statement and signed registry checkpoint, but does not independently reconstruct every feed. See [the shared-registry plan](docs/shared-registry-plan.md) and [protocol design](docs/protocol-design.md). The frozen [two-feed vector](test/fixtures/shared-registry-v1.json) contains only public artifacts and is intended for the observer's cross-repository tests.

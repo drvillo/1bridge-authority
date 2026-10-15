@@ -18,6 +18,8 @@ export { signGovernanceAction, verifyGovernanceAction, governanceActionHash, gov
 export { completionReceiptHash, verifyReceiptInclusion, type CompletionReceipt } from './completion-receipt.js'
 export { recipientKeyClaimHash, type RecipientKeyClaim } from './recipient-key.js'
 export { replayGovernanceHistory, createGovernanceReplaySession, type GovernanceReplaySnapshot, type GovernanceReplaySession } from './replay.js'
+export { verifyGovernanceHistoryExport, type GovernanceHistoryExport,
+  type RetainedGovernanceCheckpoint, type VerifiedGovernanceHistoryExport } from './history-export.js'
 export { signObserverReport, verifyObserverReport, observerEvidenceSetDigest, observerFindingHash,
   type ObserverReportScope, type ObserverReportStatement, type SignedObserverReport } from './observer-report.js'
 export { signAggregateReport, verifyAggregateReport, aggregateFeedStatusProof,
