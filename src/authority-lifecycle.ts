@@ -215,9 +215,22 @@ async function mapRoot(bindings: Map<Hash, AuthorityBinding>): Promise<Hash> {
   entries.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
   return orderedMapRoot(entries)
 }
-function resetCore(statement: AuthorityRevision, operation: Extract<AuthorityOperation, {kind:'reset'}>) {
-  return { version: 1, feedId: statement.feedId, workspaceId: statement.workspaceId, number: statement.number, previous: statement.previous,
-    rootKeySpki: operation.rootKeySpki, rootKeyId: operation.rootKeyId, recoveryKeySpki: operation.recoveryKeySpki, recoveryKeyId: operation.recoveryKeyId }
+export interface RecoveryResetCore {
+  version: 1; feedId: Hash; workspaceId: Hash; number: number; previous: Hash
+  rootKeySpki: string; rootKeyId: Hash; recoveryKeySpki: string; recoveryKeyId: Hash
+}
+
+/** Canonical possession statement shared by the next routine holder and recovery custodian. */
+export function recoveryResetCore(input: RecoveryResetCore): RecoveryResetCore {
+  const core = exact(input, ['version', 'feedId', 'workspaceId', 'number', 'previous',
+    'rootKeySpki', 'rootKeyId', 'recoveryKeySpki', 'recoveryKeyId'])
+  if (core.version !== 1 || !validHash(core.feedId) || !validHash(core.workspaceId)
+    || !positive(core.number) || !validHash(core.previous)
+    || typeof core.rootKeySpki !== 'string' || core.rootKeySpki.length === 0
+    || !validHash(core.rootKeyId)
+    || typeof core.recoveryKeySpki !== 'string' || core.recoveryKeySpki.length === 0
+    || !validHash(core.recoveryKeyId)) throw new TypeError('Invalid recovery reset core')
+  return core as unknown as RecoveryResetCore
 }
 
 export async function createAuthorityAnchor(input: {feedId: Hash; workspaceId: Hash; rootPublicKey: CryptoKey; recoveryPublicKey: CryptoKey; checkpointPublicKey: CryptoKey}): Promise<AuthorityAnchor> {
@@ -361,7 +374,10 @@ export async function applyAuthorityRevision(state: AuthorityState, revision: Si
     const recovery = await key(operation.recoveryKeySpki, operation.recoveryKeyId)
     distinct([operation.rootKeyId, operation.recoveryKeyId])
     if (next.usedKeys.has(operation.rootKeyId) || next.usedKeys.has(operation.recoveryKeyId)) throw new TypeError('Recovery key reused')
-    const core = resetCore(statement, operation)
+    const core = recoveryResetCore({ version: 1, feedId: statement.feedId,
+      workspaceId: statement.workspaceId, number: statement.number, previous: statement.previous,
+      rootKeySpki: operation.rootKeySpki, rootKeyId: operation.rootKeyId,
+      recoveryKeySpki: operation.recoveryKeySpki, recoveryKeyId: operation.recoveryKeyId })
     if (!await verifyRecord('authority.reset.new-root', core, operation.rootPossession, root)
       || !await verifyRecord('authority.reset.new-recovery', core, operation.recoveryPossession, recovery)) throw new TypeError('New recovery key possession failed')
     next.usedKeys.add(operation.rootKeyId); next.usedKeys.add(operation.recoveryKeyId)

@@ -270,9 +270,12 @@ describe('customer authority lifecycle', () => {
       previous: head.revisionHash, rootKeySpki: await library.exportSigningPublicKey(newRoot.publicKey),
       rootKeyId: await library.signingKeyId(newRoot.publicKey), recoveryKeySpki: await library.exportSigningPublicKey(newRecovery.publicKey),
       recoveryKeyId: await library.signingKeyId(newRecovery.publicKey) }
+    const portableCore = api.recoveryResetCore(resetCore)
+    expect(portableCore).toEqual(resetCore)
+    expect(() => api.recoveryResetCore({ ...resetCore, extra: true })).toThrow()
     const reset = { kind: 'reset', ...Object.fromEntries(Object.entries(resetCore).filter(([key]) => !['version', 'feedId', 'workspaceId', 'number', 'previous'].includes(key))),
-      rootPossession: await library.signRecord('authority.reset.new-root', resetCore, newRoot.privateKey),
-      recoveryPossession: await library.signRecord('authority.reset.new-recovery', resetCore, newRecovery.privateKey) }
+      rootPossession: await library.signRecord('authority.reset.new-root', portableCore, newRoot.privateKey),
+      recoveryPossession: await library.signRecord('authority.reset.new-recovery', portableCore, newRecovery.privateKey) }
     const signed = await revision(state, reset, recovery)
     await expect(api.applyAuthorityRevision(state, await revision(state, reset, root))).rejects.toThrow()
     state = await api.applyAuthorityRevision(state, signed)
