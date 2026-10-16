@@ -4,6 +4,8 @@ export { merkleRoot, inclusionProof, verifyInclusion, consistencyProof, verifyCo
 export { registryEntryBytes, registryCheckpointHash, signRegistryCheckpoint,
   verifyRegistryCheckpoint, verifyRegistryExtension,
   type RegistryEntry, type RegistryCheckpoint, type SignedRegistryCheckpoint } from './registry.js'
+export { signRegistryWitness, verifyRegistryWitness,
+  type RegistryWitnessStatement, type SignedRegistryWitness } from './registry-witness.js'
 export { createRegistryReplaySession, type RegistryReplaySession,
   type RegistryReplaySnapshot } from './registry-replay.js'
 export { emptyHistoryFrontier, appendHistory, historyFrontierRoot, type HistoryFrontier } from './history-frontier.js'
