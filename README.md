@@ -4,6 +4,14 @@ Pure TypeScript primitives for workspace-scoped authority and independently chec
 
 Implemented primitives: RFC 9162 Merkle history and append frontier, deterministic ordered-map presence/absence proofs, restricted canonical JSON and base64url, purpose-bound native P-256 signatures, audience-scoped salted evidence commitments, signed governance checkpoints, pinned customer-root authority replay, exact recipient-key commitments and app-UUID mappings, actor-signed governance actions, inclusion receipts, complete-prefix and process-local bounded-page mixed-history replay, a signed multi-feed registry with process-local replay, scoped per-feed and aggregate observer reports, a compact registry-witness contract, and RFC 9474 blind proof-access tokens. The existing 1Bridge app imports a pinned revision of this package; the new compact-witness contract is not yet integrated into that app or a deployed observer. No production audit or formal verification is claimed.
 
+## Install
+
+```sh
+pnpm add @drvillo/1bridge-authority
+```
+
+Requires Node 22 or later. The registry package ships compiled `dist/` output; pin an exact version.
+
 ## Development
 
 Use Node 22 or later and pnpm 10.29.3:
@@ -15,7 +23,7 @@ pnpm typecheck
 pnpm build
 ```
 
-Git consumers must pin an immutable commit and allow this first-party package's `prepare` build under pnpm 10. In the consumer's `pnpm-workspace.yaml`:
+Git consumers of a commit that is not yet published must pin an immutable commit and allow this first-party package's `prepare` build under pnpm 10. In the consumer's `pnpm-workspace.yaml`:
 
 ```yaml
 onlyBuiltDependencies:

@@ -1,6 +1,6 @@
 {
   "name": "@drvillo/1bridge-authority",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Workspace-scoped authenticated authority and nonblocking governance evidence",
   "type": "module",
   "license": "MIT",
@@ -14,6 +14,15 @@
     "LICENSE",
     "README.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/drvillo/1bridge-authority.git"
+  },
+  "homepage": "https://github.com/drvillo/1bridge-authority#readme",
+  "bugs": "https://github.com/drvillo/1bridge-authority/issues",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -30,7 +39,9 @@
     "build": "tsc -p tsconfig.build.json",
     "prepare": "pnpm build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "pnpm run typecheck && pnpm test && pnpm run build",
+    "publish:npm": "npm publish"
   },
   "devDependencies": {
     "@types/node": "20.19.27",

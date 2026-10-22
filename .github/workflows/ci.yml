@@ -21,11 +21,16 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Install pnpm
         run: npm install --global pnpm@10.29.3
+      # Reproducible install: fails if pnpm-lock.yaml drifts.
+      # --ignore-scripts is redundant with .npmrc but explicit here as a hard gate.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Test
         run: pnpm test
       - name: Typecheck
         run: pnpm typecheck
       - name: Build
         run: pnpm build
+      # Verify the published tarball only contains what "files" allows.
+      - name: Inspect publish contents
+        run: npm pack --dry-run
